@@ -1,11 +1,10 @@
 package org.mavendb;
 
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import com.google.inject.Guice;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 import java.util.logging.Level;
@@ -18,7 +17,6 @@ import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.codehaus.plexus.util.StringUtils;
 import org.eclipse.persistence.config.PersistenceUnitProperties;
-import org.eclipse.sisu.space.BeanScanning;
 
 /**
  * Entrance of the application.
@@ -142,22 +140,9 @@ public class Main {
             return;
         }
 
-        if (line.hasOption(CommandOptions.OPTION_REPOSNAME_LONGOPT)) {
-            String reposName = line.getOptionValue(CommandOptions.OPTION_REPOSNAME_LONGOPT);
-            String reposFileName = getDirectoryFileName(DIR_ETC, String.format("repos-%s.properties", reposName));
-            if (new File(reposFileName).exists()) {
-                // Load Repos Properties
-                Properties reposProp = new Properties();
-                try (BufferedReader br = new BufferedReader(new FileReader(reposFileName, StandardCharsets.UTF_8))) {
-                    reposProp.load(br);
-                }
-
-                final com.google.inject.Module app = org.eclipse.sisu.launch.Main.wire(BeanScanning.INDEX);
-                Guice.createInjector(app).getInstance(MvnScanner.class).perform(reposProp, loadConfig());
-            } else {
-                LOG.log(Level.SEVERE, "Repos config file does not exist: {0}", reposFileName);
-                Main.printHelp();
-            }
+        if (line.hasOption(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT)) {
+            String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
+            new MvnScanner(URI.create(reposFolder)).perform(loadConfig());
         } else {
             Main.printHelp();
         }
@@ -187,12 +172,12 @@ public class Main {
         /**
          * Command line option: Maven Repos name long name format.
          */
-        private static final String OPTION_REPOSNAME_LONGOPT = "reposname";
+        private static final String OPTION_REPOS_FOLDER_LONGOPT = "reposfolder";
         /**
          * Command line option: Maven Repos name to scan, like central, spring.
          */
         @SuppressWarnings(value="UUF_UNUSED_FIELD")
-        private static final Option OPTION_RESPOSNAME = new Option("r", OPTION_REPOSNAME_LONGOPT, true, "Maven Repos name to scan, like central, spring; the name will match to the config file at etc/repos-<the name>.properties. Example values: central, spring");
+        private static final Option OPTION_RESPOSNAME = new Option("r", OPTION_REPOS_FOLDER_LONGOPT, true, "Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties. Example values: central, spring");
         /**
          * Command line option: print help information.
          */

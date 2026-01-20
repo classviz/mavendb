@@ -6,7 +6,7 @@
 
     <groupId>org.mavendb</groupId>
     <artifactId>mavendb</artifactId>
-    <version>5.0</version>
+    <version>6.0</version>
     <packaging>jar</packaging>
 
     <name>mavendb</name>
@@ -20,59 +20,57 @@
 
     <properties>
         <maven.build.timestamp.format>yyyyMMdd.HHmmss</maven.build.timestamp.format>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <buildnumber-maven-plugin.version>3.2.1</buildnumber-maven-plugin.version><!-- https://mvnrepository.com/artifact/org.codehaus.mojo/buildnumber-maven-plugin -->
-        <checkstyle.version>10.25.0</checkstyle.version><!-- https://mvnrepository.com/artifact/com.puppycrawl.tools/checkstyle -->
+        <buildnumber-maven-plugin.version>3.3.0</buildnumber-maven-plugin.version><!-- https://mvnrepository.com/artifact/org.codehaus.mojo/buildnumber-maven-plugin -->
+        <checkstyle.version>13.0.0</checkstyle.version><!-- https://mvnrepository.com/artifact/com.puppycrawl.tools/checkstyle -->
         <git-commit-id-maven-plugin.version>9.0.2</git-commit-id-maven-plugin.version><!-- https://mvnrepository.com/artifact/io.github.git-commit-id/git-commit-id-maven-plugin -->
-        <maven-assembly-plugin.version>3.7.1</maven-assembly-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-assembly-plugin -->
+        <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-assembly-plugin -->
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-checkstyle-plugin -->
-        <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-compiler-plugin -->
-        <maven-dependency-plugin.version>3.8.1</maven-dependency-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-dependency-plugin -->
-        <maven-jar-plugin.version>3.4.2</maven-jar-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-jar-plugin -->
-        <maven-javadoc-plugin.version>3.11.2</maven-javadoc-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-javadoc-plugin -->
+        <maven-compiler-plugin.version>3.14.1</maven-compiler-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-compiler-plugin -->
+        <maven-dependency-plugin.version>3.9.0</maven-dependency-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-dependency-plugin -->
+        <maven-jar-plugin.version>3.5.0</maven-jar-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-jar-plugin -->
+        <maven-javadoc-plugin.version>3.12.0</maven-javadoc-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-javadoc-plugin -->
         <maven-jxr-plugin.version>3.6.0</maven-jxr-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-jxr-plugin -->
-        <maven-pmd-plugin.version>3.26.0</maven-pmd-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-pmd-plugin -->
-        <maven-resources-plugin.version>3.3.1</maven-resources-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-resources-plugin -->
+        <maven-pmd-plugin.version>3.28.0</maven-pmd-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-pmd-plugin -->
+        <maven-resources-plugin.version>3.4.0</maven-resources-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-resources-plugin -->
         <maven-scm-publish-plugin.version>3.3.0</maven-scm-publish-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-scm-publish-plugin -->
-        <maven-surefire-report-plugin.version>3.5.3</maven-surefire-report-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-surefire-report-plugin -->
-        <spotbugs-maven-plugin.version>4.9.3.0</spotbugs-maven-plugin.version><!-- https://mvnrepository.com/artifact/com.github.spotbugs/spotbugs-maven-plugin -->
+        <maven-surefire-report-plugin.version>3.5.4</maven-surefire-report-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-surefire-report-plugin -->
+        <spotbugs-maven-plugin.version>4.9.8.2</spotbugs-maven-plugin.version><!-- https://mvnrepository.com/artifact/com.github.spotbugs/spotbugs-maven-plugin -->
 
-        <commons-cli.version>1.9.0</commons-cli.version><!-- https://mvnrepository.com/artifact/commons-cli/commons-cli -->
-        <commons-codec.version>1.19.0</commons-codec.version><!-- https://mvnrepository.com/artifact/commons-codec/commons-codec -->
-        <commons-lang3.version>3.18.0</commons-lang3.version><!-- https://mvnrepository.com/artifact/org.apache.commons/commons-lang3 -->
-        <eclipselink.version>4.0.7</eclipselink.version><!-- https://mvnrepository.com/artifact/org.eclipse.persistence/eclipselink -->
-        <gson.version>2.13.1</gson.version><!-- https://mvnrepository.com/artifact/com.google.code.gson/gson -->
-        <guice.version>6.0.0</guice.version><!-- https://mvnrepository.com/artifact/com.google.inject/guice -->
+        <commons-cli.version>1.11.0</commons-cli.version><!-- https://mvnrepository.com/artifact/commons-cli/commons-cli -->
+        <commons-codec.version>1.20.0</commons-codec.version><!-- https://mvnrepository.com/artifact/commons-codec/commons-codec -->
+        <commons-lang3.version>3.20.0</commons-lang3.version><!-- https://mvnrepository.com/artifact/org.apache.commons/commons-lang3 -->
+        <eclipselink.version>4.0.9</eclipselink.version><!-- https://mvnrepository.com/artifact/org.eclipse.persistence/eclipselink -->
+        <gson.version>2.13.2</gson.version><!-- https://mvnrepository.com/artifact/com.google.code.gson/gson -->
         <indexer-core.version>7.1.6</indexer-core.version><!-- https://mvnrepository.com/artifact/org.apache.maven.indexer/indexer-core -->
         <jakarta.persistence-api.version>3.2.0</jakarta.persistence-api.version><!-- https://mvnrepository.com/artifact/jakarta.persistence/jakarta.persistence-api -->
         <mybatis.version>3.5.19</mybatis.version><!-- https://mvnrepository.com/artifact/org.mybatis/mybatis -->
-        <mysql-connector-j.version>9.3.0</mysql-connector-j.version><!-- https://mvnrepository.com/artifact/com.mysql/mysql-connector-j -->
-        <org.eclipse.sisu.inject.version>0.9.0.M2</org.eclipse.sisu.inject.version><!-- https://mvnrepository.com/artifact/org.eclipse.sisu/org.eclipse.sisu.inject -->
+        <mysql-connector-j.version>9.5.0</mysql-connector-j.version><!-- https://mvnrepository.com/artifact/com.mysql/mysql-connector-j -->
         <slf4j.version>2.0.17</slf4j.version><!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-simple -->
-        <spotbugs.version>4.9.3</spotbugs.version><!-- https://mvnrepository.com/artifact/com.github.spotbugs/spotbugs -->
+        <spotbugs.version>4.9.8</spotbugs.version><!-- https://mvnrepository.com/artifact/com.github.spotbugs/spotbugs -->
     </properties>
 
     <scm>
-        <connection>scm:git:https://github.com/javaclassfile/mavendb</connection>
-        <developerConnection>scm:git:https://github.com/javaclassfile/mavendb</developerConnection>
-        <url>https://github.com/javaclassfile/mavendb</url>
+        <connection>scm:git:https://github.com/classviz/mavendb</connection>
+        <developerConnection>scm:git:https://github.com/classviz/mavendb</developerConnection>
+        <url>https://github.com/classviz/mavendb</url>
     </scm>
     <issueManagement>
         <system>github</system>
-        <url>https://github.com/javaclassfile/mavendb/issues</url>
+        <url>https://github.com/classviz/mavendb/issues</url>
     </issueManagement>
     <distributionManagement>
         <repository>
             <id>github</id>
             <name>GitHub OWNER Apache Maven Packages</name>
-            <url>https://maven.pkg.github.com/javaclassfile/mavendb</url>
+            <url>https://maven.pkg.github.com/classviz/mavendb</url>
         </repository>
         <site>
             <id>github.com</id>
-            <url>scm:git:https://github.com/javaclassfile/mavendb.git</url>
+            <url>scm:git:https://github.com/classviz/mavendb.git</url>
         </site>
     </distributionManagement>
 
@@ -82,14 +80,6 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>${gson.version}</version>
-            <type>jar</type>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>com.google.inject</groupId>
-            <artifactId>guice</artifactId>
-            <version>${guice.version}</version>
             <type>jar</type>
             <scope>compile</scope>
         </dependency>
@@ -143,17 +133,17 @@
         </dependency>
 
         <dependency>
-            <groupId>org.eclipse.persistence</groupId>
-            <artifactId>eclipselink</artifactId>
-            <version>${eclipselink.version}</version>
+            <groupId>org.apache.maven.indexer</groupId>
+            <artifactId>indexer-reader</artifactId>
+            <version>${indexer-core.version}</version>
             <type>jar</type>
             <scope>compile</scope>
         </dependency>
 
         <dependency>
-            <groupId>org.eclipse.sisu</groupId>
-            <artifactId>org.eclipse.sisu.inject</artifactId>
-            <version>${org.eclipse.sisu.inject.version}</version>
+            <groupId>org.eclipse.persistence</groupId>
+            <artifactId>eclipselink</artifactId>
+            <version>${eclipselink.version}</version>
             <type>jar</type>
             <scope>compile</scope>
         </dependency>

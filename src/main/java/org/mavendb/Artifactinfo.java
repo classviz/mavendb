@@ -23,26 +23,23 @@ import org.eclipse.persistence.annotations.CacheType;
 @Cache(type = CacheType.NONE)  // Does not preserve object identity and does not cache objects.
 @NamedQueries({
     @NamedQuery(name = "Artifactinfo.findAll", query = "SELECT a FROM Artifactinfo a")
-    , @NamedQuery(name = "Artifactinfo.findByUinfoMd5", query = "SELECT a FROM Artifactinfo a WHERE a.uinfoMd5 = :uinfoMd5")  // Only select one column to speed up
+    , @NamedQuery(name = "Artifactinfo.findBysha1Md5", query = "SELECT a FROM Artifactinfo a WHERE a.sha1Md5 = :sha1Md5")  // Only select one column to speed up
     , @NamedQuery(name = "Artifactinfo.findByMajorVersion", query = "SELECT a FROM Artifactinfo a WHERE a.majorVersion = :majorVersion")
 })
 @SuppressFBWarnings({"EI_EXPOSE_REP2"})
 public class Artifactinfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
-    protected static final int UINFO_MAX_LEN = 250;
 
     @Id
     @Basic(optional = false)
-    @Column(name = "uinfo_md5")
-    private byte[] uinfoMd5;
+    @Column(name = "sha1_md5")
+    private byte[] sha1Md5;
 
     @Column(name = "major_version")
     private Integer majorVersion;
     @Column(name = "version_seq")
     private BigInteger versionSeq;
-    @Column(name = "uinfo_length")
-    private Integer uinfoLength;
     @Column(name = "classifier_length")
     private Integer classifierLength;
 
@@ -52,8 +49,6 @@ public class Artifactinfo implements Serializable {
     private Integer sourcesExists;
     @Column(name = "javadoc_exists")
     private Integer javadocExists;
-    @Column(name = "uinfo")
-    private String uinfo;
 
     /**
      * We treat MySQL JSON data type as String.
@@ -65,13 +60,13 @@ public class Artifactinfo implements Serializable {
     }
 
     public Artifactinfo(byte[] md5) {
-        this.uinfoMd5 = md5;
+        this.sha1Md5 = md5;
     }
 
     @Override
     public int hashCode() {
         int hash = 0;
-        hash += (this.uinfoMd5 != null ? Arrays.hashCode(this.uinfoMd5) : 0);
+        hash += (this.sha1Md5 != null ? Arrays.hashCode(this.sha1Md5) : 0);
         return hash;
     }
 
@@ -81,22 +76,22 @@ public class Artifactinfo implements Serializable {
             return false;
         }
         Artifactinfo other = (Artifactinfo) object;
-        return (other.uinfoMd5 != null) && Arrays.equals(other.uinfoMd5, this.uinfoMd5);
+        return (other.sha1Md5 != null) && Arrays.equals(other.sha1Md5, this.sha1Md5);
     }
 
     @Override
     public String toString() {
-        return this.getClass().getName() + "[ uinfo=" + Hex.encodeHexString(this.uinfoMd5) + " ]";
+        return this.getClass().getName() + "[ uinfo=" + Hex.encodeHexString(this.sha1Md5) + " ]";
     }
 
     @SuppressFBWarnings(value="EI_EXPOSE_REP", justification="it is fine")
-    public byte[] getUinfoMd5() {
-        return uinfoMd5;
+    public byte[] getSha1Md5() {
+        return sha1Md5;
     }
 
     @SuppressFBWarnings(value="EI_EXPOSE_REP2", justification="it is fine")
-    public void setUinfoMd5(byte[] uinfoMd5) {
-        this.uinfoMd5 = uinfoMd5;
+    public void setSha1Md5(byte[] sha1Md5) {
+        this.sha1Md5 = sha1Md5;
     }
 
     public Integer getMajorVersion() {
@@ -113,14 +108,6 @@ public class Artifactinfo implements Serializable {
 
     public void setVersionSeq(BigInteger versionSeq) {
         this.versionSeq = versionSeq;
-    }
-
-    public Integer getUinfoLength() {
-        return uinfoLength;
-    }
-
-    public void setUinfoLength(Integer uinfoLength) {
-        this.uinfoLength = uinfoLength;
     }
 
     public Integer getClassifierLength() {
@@ -153,14 +140,6 @@ public class Artifactinfo implements Serializable {
 
     public void setJavadocExists(Integer javadocExists) {
         this.javadocExists = javadocExists;
-    }
-
-    public String getUinfo() {
-        return uinfo;
-    }
-
-    public void setUinfo(String uinfo) {
-        this.uinfo = uinfo;
     }
 
     public String getJson() {

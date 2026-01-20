@@ -1,34 +1,26 @@
 package org.mavendb;
 
 import com.google.gson.Gson;
-import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import jakarta.persistence.CacheStoreMode;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.FlushModeType;
 import jakarta.persistence.Persistence;
-import jakarta.persistence.TypedQuery;
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.Reader;
 import java.math.BigInteger;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
-import static java.util.Objects.requireNonNull;
 import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
@@ -40,28 +32,18 @@ import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.MultiBits;
-import org.apache.lucene.index.StoredFields;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.util.Bits;
-import org.apache.maven.index.ArtifactInfo;
-import org.apache.maven.index.Indexer;
-import org.apache.maven.index.context.IndexCreator;
-import org.apache.maven.index.context.IndexUtils;
-import org.apache.maven.index.context.IndexingContext;
-import org.apache.maven.index.updater.IndexUpdateRequest;
-import org.apache.maven.index.updater.IndexUpdateResult;
-import org.apache.maven.index.updater.IndexUpdater;
-import org.apache.maven.index.updater.ResourceFetcher;
-import org.eclipse.persistence.config.HintValues;
-import org.eclipse.persistence.config.QueryHints;
+import org.apache.maven.index.reader.ChunkReader;
+import org.apache.maven.index.reader.IndexReader;
+import org.apache.maven.index.reader.RecordExpander;
+import org.apache.maven.index.reader.ResourceHandler;
+import org.apache.maven.index.reader.WritableResourceHandler;
+import org.apache.maven.index.reader.resource.PathWritableResourceHandler;
+import org.apache.maven.index.reader.resource.UriResourceHandler;
 
 /**
  * Scan all artifacts in maven repository.
  *
- * @see <a href="https://github.com/apache/maven-indexer/blob/master/indexer-examples/indexer-examples-basic/src/main/java/org/apache/maven/index/examples/BasicUsageExample.java">BasicUsageExample</a>
+ * @see <a href="https://github.com/apache/maven-indexer/blob/master/indexer-reader/src/test/java/org/apache/maven/index/reader/IndexReaderTest.java">IndexReaderTest</a>
  */
 @Singleton
 @Named
@@ -72,28 +54,12 @@ public class MvnScanner {
     private static final String ENTITY_MANAGER_FACTORY = "PUMvn";
 
     /**
-     * Maven Repository configuration - name.
-     */
-    static final String REPOS_NAME = "repository";
-    /**
-     * Maven Repository configuration - URL.
-     */
-    static final String REPOS_URL = "repositoryUrl";
-    /**
      * Utility to convert to JSON string.
      */
     private static final Gson JSON = new Gson();
     private static final int STORE_PACKAGE_SIZE = 1000000;
 
-    // Injections
-    private final Indexer indexer;
-    private final IndexUpdater indexUpdater;
-    private final Map<String, IndexCreator> indexCreators;
-
-    /**
-     * Context
-     */
-    private IndexingContext reposContext;
+    private final URI indexFolder;
 
     /**
      * Database store factory.
@@ -105,24 +71,18 @@ public class MvnScanner {
      */
     private List<Artifactinfo> dbList = new ArrayList<>();
 
-    @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "it is fine from injection")
     @Inject
-    public MvnScanner(Indexer indexer, IndexUpdater indexUpdater, Map<String, IndexCreator> indexCreators) {
-        this.indexer = requireNonNull(indexer);
-        this.indexUpdater = requireNonNull(indexUpdater);
-        this.indexCreators = requireNonNull(indexCreators);
+    public MvnScanner(URI indexFolder) {
+        this.indexFolder = indexFolder;
     }
 
-    public void perform(Properties repos, Properties config) throws IOException {
+    public void perform(Properties config) throws IOException {
         this.emf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
 
         // Prepare Schema
         this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB, Main.DB_CREATE_SQL));
 
         long start = System.currentTimeMillis();
-        this.stepRefreshIndex(
-                repos.getProperty(REPOS_NAME),
-                repos.getProperty(REPOS_URL));
         this.stepScan();
         LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
@@ -149,77 +109,6 @@ public class MvnScanner {
         }
     }
 
-    /**
-     * Refresh the index (incremental update if not the first run).
-     *
-     * @throws IOException Exception
-     */
-    private void stepRefreshIndex(String repos, String url) throws IOException {
-
-        // Creators we want to use (search for fields it defines)
-        List<IndexCreator> indexers = new ArrayList<>();
-        indexers.add(requireNonNull(indexCreators.get("min")));
-        indexers.add(requireNonNull(indexCreators.get("jarContent")));
-        indexers.add(requireNonNull(indexCreators.get("maven-plugin")));
-
-        // Create context for central repository index
-        final String varFolder = Main.getDirectoryFileName(Main.DIR_VAR, null) + File.separator;
-        this.reposContext = indexer.createIndexingContext(
-                repos + "-context", // ID
-                repos, // Repository ID
-                new File(varFolder + repos + "-cache"), // Repository Directory
-                new File(varFolder + repos + "-index"), // Index Directory -  Files where local cache is (if any) and Lucene Index should be located
-                url, null, true, true, indexers);
-
-        Instant updateStart = Instant.now();
-        LOG.log(Level.INFO, "Refreshing Maven Index...");
-        LOG.log(Level.INFO, "This might take a while on first run, so please be patient.");
-
-        Date centralContextCurrentTimestamp = reposContext.getTimestamp();
-        IndexUpdateRequest updateRequest = new IndexUpdateRequest(reposContext, new ResourceFetcher() {
-            private final HttpClient client = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
-            private URI uri;
-
-            @Override
-            public void connect(String id, String url) throws IOException {
-                this.uri = URI.create(url + "/");
-            }
-
-            @SuppressWarnings("java:S1186") // Methods should not be empty
-            @Override
-            public void disconnect() throws IOException {
-            }
-
-            @Override
-            public InputStream retrieve(String name) throws IOException {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(uri.resolve(name))
-                        .GET()
-                        .build();
-                try {
-                    HttpResponse<InputStream> response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
-                    if (response.statusCode() == HttpURLConnection.HTTP_OK) {
-                        return response.body();
-                    } else {
-                        throw new IOException("Unexpected response: " + response);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException(e);
-                }
-            }
-        });
-
-        IndexUpdateResult updateResult = indexUpdater.fetchAndUpdateIndex(updateRequest);
-        if (updateResult.isFullUpdate()) {
-            LOG.info("Full update happened!");
-        } else {
-            LOG.info(String.format("Incremental update happened, change covered %s - %s period.",
-                    centralContextCurrentTimestamp, updateResult.getTimestamp()));
-        }
-
-        LOG.log(Level.INFO, "Finished in {0} sec", Duration.between(updateStart, Instant.now()).getSeconds());
-    }
 
     /**
      * Scan maven index files.
@@ -228,73 +117,98 @@ public class MvnScanner {
      */
     @SuppressWarnings("java:S3776") // Cognitive Complexity of methods should not be too high
     private void stepScan() throws IOException {
-        final IndexSearcher searcher = reposContext.acquireIndexSearcher();
+        Path tempDir = Files.createTempDirectory("mvn-index");
 
-        try {
-            final IndexReader ir = searcher.getIndexReader();
-            LOG.log(Level.INFO, "Maven maxDoc={0}", String.format("%,8d%n", ir.maxDoc()));
+        try (
+            ResourceHandler remote = new UriResourceHandler(this.indexFolder);
+            WritableResourceHandler local = new PathWritableResourceHandler(tempDir);
+            IndexReader indexReader = new IndexReader(local, remote)
+        ) {
+            LOG.log(Level.INFO,"indexRepoId=" + indexReader.getIndexId());
+            LOG.log(Level.INFO,"indexLastPublished=" + indexReader.getPublishedTimestamp());
+            LOG.log(Level.INFO,"isIncremental=" + indexReader.isIncremental());
+            LOG.log(Level.INFO,"indexRequiredChunkNames=" + indexReader.getChunkNames());
 
-            final StoredFields storedFields = ir.storedFields();
-            Bits liveDocs = MultiBits.getLiveDocs(ir);
-            int i = 0;
-            for (; i < ir.maxDoc(); i++) {
-                if (liveDocs == null || liveDocs.get(i)) {
-                    final Document doc = storedFields.document(i);
-                    final ArtifactInfo ai = IndexUtils.constructArtifactInfo(doc, reposContext);
-                    if (ai != null) {
-                        this.add(ai);
+            for (ChunkReader chunkReader : indexReader) {
+
+                LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
+                LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
+                LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
+
+                // List one by one all recordsin the chunk
+                try (chunkReader) {
+                    final RecordExpander recordExpander = new RecordExpander();
+                    long i = 0;
+                    for (Map<String, String> rec : chunkReader) {
+                        i++;
+                        final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
+                        JsonObject jsonObject = new JsonObject();
+                        record.getExpanded().forEach((k, v) -> {
+                            if (k.getProto().equals(String.class)) {
+                                jsonObject.addProperty(k.getName(), record.getString(k));
+                            } else if (k.getProto().equals(String[].class)) {
+                                JsonArray stringArray = new JsonArray();
+                                for (String s : record.getStringArray(k)) {
+                                    stringArray.add(s);
+                                }
+                                jsonObject.add(k.getName(), stringArray);
+                            } else if (k.getProto().equals(Long.class)) {
+                                jsonObject.addProperty(k.getName(), record.getLong(k));
+                            } else if (k.getProto().equals(Boolean.class)) {
+                                jsonObject.addProperty(k.getName(), record.getBoolean(k));
+                            } else {
+                                LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
+                            }
+                        });
+
+                        this.add(jsonObject, i);
                         this.store(false, i);
-                    } else {
-                        LOG.log(Level.WARNING, "{0}. ArtifactInfo is null", i);
                     }
-                } else {
-                    LOG.log(Level.WARNING, "{0}. This record is ignored, because of: liveDocs == null || liveDocs.get(i)", i);
-                }
-            }
 
-            this.store(true, i);
-        } finally {
-            reposContext.releaseIndexSearcher(searcher);
+                    this.store(true, i);
+                }
+
+            }
         }
     }
 
-    private void add(ArtifactInfo ai) {
-        // UInfo can never be null, based on its source code
-        //  - https://github.com/apache/maven-indexer/blob/maven-indexer-7.0.0/indexer-core/src/main/java/org/apache/maven/index/ArtifactInfo.java#L382
-        String uinfo = ai.getUinfo();
-        byte[] uinfoMd5 = DigestUtils.md5(uinfo);
+    private void add(JsonObject jobj, long i) {
+
+        if (!jobj.has(org.apache.maven.index.reader.Record.SHA1.getName())) {
+            LOG.log(Level.WARNING, "Record #" + i + " skipped due to no SHA1 field: " + jobj.toString()); 
+            return;
+        }
+
+        String sha1String = jobj.get(org.apache.maven.index.reader.Record.SHA1.getName()).getAsString();
+        byte[] sha1Md5 = DigestUtils.md5(sha1String);
 
         try (EntityManager em = emf.createEntityManager()) {
-            TypedQuery<Artifactinfo> query = em.createNamedQuery("Artifactinfo.findByUinfoMd5", Artifactinfo.class);
-            // Set hints for performance
+            /*
+            TypedQuery<Artifactinfo> query = em.createNamedQuery("Artifactinfo.findBySha1Md5", Artifactinfo.class);
             query.setHint(QueryHints.READ_ONLY, HintValues.TRUE);
             query.setHint(QueryHints.CACHE_STORE_MODE, CacheStoreMode.BYPASS);  // Don't insert into cache
-            query.setParameter("uinfoMd5", uinfoMd5);
+            query.setParameter("sha1Md5", sha1Md5);
 
             List<Artifactinfo> result = query.getResultList();
             if (result != null && !result.isEmpty()) {
-                LOG.log(Level.FINE, "Record exists. No update needed for {0}", ai.getUinfo());
-            } else {
-                VersionAnalyser verAr = new VersionAnalyser(ai.getVersion());
+            */
 
-                // Prepare the Entity Object
-                Artifactinfo dbAi = new Artifactinfo(uinfoMd5);
+            VersionAnalyser verAr = new VersionAnalyser(jobj.get(org.apache.maven.index.reader.Record.VERSION.getName()).getAsString());
 
-                dbAi.setMajorVersion(verAr.getMajorVersion());
-                dbAi.setVersionSeq(BigInteger.valueOf(verAr.getVersionSeq()));
-                dbAi.setUinfoLength(uinfo.length());
-                dbAi.setClassifierLength(StringUtils.length(ai.getClassifier()));
+            // Prepare the Entity Object
+            Artifactinfo dbAi = new Artifactinfo(sha1Md5);
+            dbAi.setMajorVersion(verAr.getMajorVersion());
+            dbAi.setVersionSeq(BigInteger.valueOf(verAr.getVersionSeq()));
+            dbAi.setClassifierLength(StringUtils.length(jobj.get(org.apache.maven.index.reader.Record.CLASSIFIER.getName()).getAsString()));
 
-                dbAi.setSignatureExists(ai.getSourcesExists().ordinal());
-                dbAi.setSourcesExists(ai.getSourcesExists().ordinal());
-                dbAi.setJavadocExists(ai.getJavadocExists().ordinal());
+            dbAi.setSignatureExists(jobj.get(org.apache.maven.index.reader.Record.HAS_SIGNATURE.getName()).getAsBoolean() ? 1 : 0);
+            dbAi.setSourcesExists(jobj.get(org.apache.maven.index.reader.Record.HAS_SOURCES.getName()).getAsBoolean() ? 1 : 0);
+            dbAi.setJavadocExists(jobj.get(org.apache.maven.index.reader.Record.HAS_JAVADOC.getName()).getAsBoolean() ? 1 : 0);
 
-                dbAi.setUinfo(StringUtils.left(uinfo, Artifactinfo.UINFO_MAX_LEN));
-                dbAi.setJson(JSON.toJson(ai));
+            dbAi.setJson(jobj.toString());
 
-                // Add to DB To be saved List
-                this.dbList.add(dbAi);
-            }
+            // Add to DB To be saved List
+            this.dbList.add(dbAi);
 
             em.clear();
         }
@@ -305,7 +219,7 @@ public class MvnScanner {
      *
      * @param force Flag to force save or not
      */
-    private void store(final boolean force, final int counter) throws IOException {
+    private void store(final boolean force, final long counter) throws IOException {
         // Nothing to be saved
         if (this.dbList.isEmpty()) {
             return;

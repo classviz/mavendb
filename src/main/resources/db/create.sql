@@ -4,18 +4,16 @@ USE `mavendb`;
 
 DROP TABLE IF exists `artifactinfo`;
 CREATE TABLE `artifactinfo` (
-  `uinfo_md5`                    binary(16)                           NOT NULL COMMENT 'MD5 of `uinfo`',
+  `sha1_md5`                    binary(16)                           NOT NULL COMMENT 'MD5 of sha1',
 
   `major_version`                   int                           DEFAULT NULL COMMENT 'Generated from `artifact_version`, the most left part of the version',
   `version_seq`                  bigint      NOT NULL             DEFAULT '0'  COMMENT 'Generated from `artifact_version`, sequence number for the version',
-  `uinfo_length`                    int                           DEFAULT NULL COMMENT 'ArtifactInfo.getUinfo().length()',                 -- 2023.02.12  Max    175
   `classifier_length`               int                           DEFAULT NULL COMMENT 'ArtifactInfo.getClassifier().length()',            -- 2023.02.12  Max     54
 
   `signature_exists`                int                           DEFAULT NULL COMMENT 'ArtifactInfo.getSignatureExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
   `sources_exists`                  int                           DEFAULT NULL COMMENT 'ArtifactInfo.getSourcesExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
   `javadoc_exists`                  int                           DEFAULT NULL COMMENT 'ArtifactInfo.getJavadocExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
 
-  `uinfo`                       varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'ArtifactInfo.getUinfo()',
   `json`                           json                           DEFAULT NULL COMMENT 'toJson(ArtifactInfo)',                             -- 2023.01.01  Max 54,930
 
   PRIMARY KEY (`uinfo_md5`)
