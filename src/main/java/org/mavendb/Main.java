@@ -177,7 +177,7 @@ public class Main {
          * Command line option: Maven Repos name to scan, like central, spring.
          */
         @SuppressWarnings(value="UUF_UNUSED_FIELD")
-        private static final Option OPTION_RESPOSNAME = new Option("r", OPTION_REPOS_FOLDER_LONGOPT, true, "Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties. Example values: central, spring");
+        private static final Option OPTION_RESPOSNAME = new Option("f", OPTION_REPOS_FOLDER_LONGOPT, true, "Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties. Example values: central, spring");
         /**
          * Command line option: print help information.
          */

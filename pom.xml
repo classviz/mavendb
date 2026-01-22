@@ -41,7 +41,6 @@
         <spotbugs-maven-plugin.version>4.9.8.2</spotbugs-maven-plugin.version><!-- https://mvnrepository.com/artifact/com.github.spotbugs/spotbugs-maven-plugin -->
 
         <commons-cli.version>1.11.0</commons-cli.version><!-- https://mvnrepository.com/artifact/commons-cli/commons-cli -->
-        <commons-codec.version>1.20.0</commons-codec.version><!-- https://mvnrepository.com/artifact/commons-codec/commons-codec -->
         <commons-lang3.version>3.20.0</commons-lang3.version><!-- https://mvnrepository.com/artifact/org.apache.commons/commons-lang3 -->
         <eclipselink.version>4.0.9</eclipselink.version><!-- https://mvnrepository.com/artifact/org.eclipse.persistence/eclipselink -->
         <gson.version>2.13.2</gson.version><!-- https://mvnrepository.com/artifact/com.google.code.gson/gson -->
@@ -96,14 +95,6 @@
             <groupId>commons-cli</groupId>
             <artifactId>commons-cli</artifactId>
             <version>${commons-cli.version}</version>
-            <type>jar</type>
-            <scope>compile</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>commons-codec</groupId>
-            <artifactId>commons-codec</artifactId>
-            <version>${commons-codec.version}</version>
             <type>jar</type>
             <scope>compile</scope>
         </dependency>

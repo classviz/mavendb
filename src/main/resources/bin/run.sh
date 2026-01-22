@@ -11,7 +11,7 @@ timestamp() {
 }
 
 if [ $# -eq 0 ]; then
-  echo "$0 $(timestamp) No arguments supplied. The repos name is expected."
+  echo "$0 $(timestamp) No arguments supplied. The repos folder is expected."
   exit 1
 fi
 
@@ -44,7 +44,7 @@ JAVA_OPTS=" \
  -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile \
 "
 
-RUN_CMD="java $JAVA_OPTS -Xmx16g -server -jar $BASEDIR/../mavendb.jar -r $1"
+RUN_CMD="java $JAVA_OPTS -Xmx16g -server -jar $BASEDIR/../mavendb.jar -f $1"
 echo "$(timestamp) $RUN_CMD"
 eval               $RUN_CMD
 

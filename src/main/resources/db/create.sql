@@ -2,54 +2,48 @@ CREATE SCHEMA IF NOT EXISTS `mavendb` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8
 USE `mavendb`;
 
 
-DROP TABLE IF exists `artifactinfo`;
-CREATE TABLE `artifactinfo` (
-  `sha1_md5`                    binary(16)                           NOT NULL COMMENT 'MD5 of sha1',
+DROP TABLE IF exists `record`;
+CREATE TABLE `record` (
+  `seqid`                        bigint                           NOT NULL     COMMENT 'Squence ID',
 
   `major_version`                   int                           DEFAULT NULL COMMENT 'Generated from `artifact_version`, the most left part of the version',
   `version_seq`                  bigint      NOT NULL             DEFAULT '0'  COMMENT 'Generated from `artifact_version`, sequence number for the version',
-  `classifier_length`               int                           DEFAULT NULL COMMENT 'ArtifactInfo.getClassifier().length()',            -- 2023.02.12  Max     54
-
-  `signature_exists`                int                           DEFAULT NULL COMMENT 'ArtifactInfo.getSignatureExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `sources_exists`                  int                           DEFAULT NULL COMMENT 'ArtifactInfo.getSourcesExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `javadoc_exists`                  int                           DEFAULT NULL COMMENT 'ArtifactInfo.getJavadocExists()\norg.apache.maven.index.ArtifactAvailability: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-
   `json`                           json                           DEFAULT NULL COMMENT 'toJson(ArtifactInfo)',                             -- 2023.01.01  Max 54,930
 
-  PRIMARY KEY (`uinfo_md5`)
-) ENGINE=InnoDB COLLATE=utf8mb4_bin COMMENT 'Maven Repos ArtifactInfo, from https://github.com/apache/maven-indexer/blob/master/indexer-core/src/main/java/org/apache/maven/index/ArtifactInfo.java';
+  PRIMARY KEY (`seqid`)
+) ENGINE=InnoDB COLLATE=utf8mb4_bin COMMENT 'Maven Repos Record, from https://github.com/apache/maven-indexer/blob/master/indexer-reader/src/main/java/org/apache/maven/index/reader/Record.java';
 
 
 DROP TABLE IF exists `gav`;
 CREATE TABLE         `gav` (
-  `uinfo`                       varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`uinfo`',
+  `seqid`                       bigint                                NOT NULL COMMENT 'From [record]-`seqid`',
 
-  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.groupId"`',         -- 2023.02.12  Max 93
-  `artifact_id`                 varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.artifactId"`',      -- 2023.02.12  Max 87
-  `artifact_version`            varchar(128)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.version"`',         -- 2023.02.12  Max 94
+  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.groupId"`',         -- 2023.02.12  Max 93
+  `artifact_id`                 varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.artifactId"`',      -- 2023.02.12  Max 87
+  `artifact_version`            varchar(128)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.version"`',         -- 2023.02.12  Max 94
 
   `file_name`                   varchar(512)  COLLATE utf8mb4_bin  GENERATED ALWAYS AS (LEFT( if( isnull(classifier),
                                                                       concat(artifact_id, '-', artifact_version, '.', file_extension),
                                                                       concat(artifact_id, '-', artifact_version, '-', classifier, '.', file_extension)), 512)) virtual
                                                                       NOT NULL COMMENT 'MVN file name',
 
-  `major_version`                   int                           DEFAULT NULL COMMENT 'From [artifactinfo]-`major_version`',
-  `version_seq`                  bigint                               NOT NULL COMMENT 'From [artifactinfo]-`version_seq`',
+  `major_version`                   int                           DEFAULT NULL COMMENT 'From [record]-`major_version`',
+  `version_seq`                  bigint                               NOT NULL COMMENT 'From [record]-`version_seq`',
 
-  `last_modified`              DATETIME                           DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.lastModified"`',
-  `size`                         bigint                           DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.size"`',
-  `sha1`                           char(  40) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.sha1"`',
+  `last_modified`              DATETIME                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.lastModified"`',
+  `size`                         bigint                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.size"`',
+  `sha1`                           char(  40) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.sha1"`',
 
-  `signature_exists`                int                           DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.signatureExists"` or From [artifactinfo]-`signature_exists`, Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `sources_exists`                  int                           DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.sourcesExists"`   or From [artifactinfo]-`sources_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `javadoc_exists`                  int                           DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.javadocExists"`   or From [artifactinfo]-`javadoc_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `signature_exists`                int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.signatureExists"` or From [record]-`signature_exists`, Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `sources_exists`                  int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.sourcesExists"`   or From [record]-`sources_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `javadoc_exists`                  int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.javadocExists"`   or From [record]-`javadoc_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
 
-  `classifier`                  varchar( 128) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.classifier"`',
-  `classifier_length`               int                           DEFAULT NULL COMMENT 'From [artifactinfo]-`classifier_length`',
-  `file_extension`              varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.fileExtension"`',   -- 2023.02.12  Max    113
-  `packaging`                   varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.packaging"`',       -- 2023.02.12  Max    113
-  `name`                        varchar(1024) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.name"`',            -- 2023.02.12  Max    190
-  `description`                 MEDIUMTEXT    COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [artifactinfo]-`json->>"$.description"`',     -- 2023.02.12  Max 53,221
+  `classifier`                  varchar( 128) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.classifier"`',      -- 2023.02.12  Max     54
+  `classifier_length`               int                           DEFAULT NULL COMMENT 'From [record]-`classifier_length`',
+  `file_extension`              varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.fileExtension"`',   -- 2023.02.12  Max    113
+  `packaging`                   varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.packaging"`',       -- 2023.02.12  Max    113
+  `name`                        varchar(1024) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.name"`',            -- 2023.02.12  Max    190
+  `description`                 MEDIUMTEXT    COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.description"`',     -- 2023.02.12  Max 53,221
 
   KEY `index_gav` (`group_id`,`artifact_id`,`artifact_version`),
   KEY `index_fname` (`file_name`)
@@ -58,7 +52,7 @@ CREATE TABLE         `gav` (
 
 DROP TABLE IF exists `g`;
 CREATE TABLE         `g` (
-  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.groupId"`',
+  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.groupId"`',
 
   `artifact_version_counter`        int                           DEFAULT NULL,
   `major_version_counter`           int                           DEFAULT NULL,
@@ -79,8 +73,8 @@ CREATE TABLE         `g` (
 
 DROP TABLE IF exists `ga`;
 CREATE TABLE         `ga` (
-  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.groupId"`',
-  `artifact_id`                 varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [artifactinfo]-`json->>"$.artifactId"`',
+  `group_id`                    varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.groupId"`',
+  `artifact_id`                 varchar(254)  COLLATE utf8mb4_bin     NOT NULL COMMENT 'From [record]-`json->>"$.artifactId"`',
 
   `artifact_version_counter`        int                           DEFAULT NULL,
   `major_version_counter`           int                           DEFAULT NULL,

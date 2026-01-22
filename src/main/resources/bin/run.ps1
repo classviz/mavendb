@@ -1,14 +1,14 @@
 param (
     [Parameter(Mandatory=$true)]
-    [string]$reposName
+    [string]$reposFolder
 )
 
-if (-not $reposName) {
+if (-not $reposFolder) {
     Write-Host "Error: repository is requreid, example value: central spring"
     exit 1
 }
 
-Write-Host "Mvn Repository Name to scan: $reposName"
+Write-Host "Mvn Repository Name to scan: $reposFolder"
 
 java -showversion `
  -verbose:gc `
@@ -30,4 +30,4 @@ java -showversion `
  -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile `
  -Xmx16g `
  -server `
- -jar ../mavendb.jar -r $reposName
+ -jar ../mavendb.jar -f $reposFolder

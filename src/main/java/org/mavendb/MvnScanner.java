@@ -28,8 +28,6 @@ import java.util.logging.Logger;
 import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
-import org.apache.commons.codec.digest.DigestUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.ChunkReader;
@@ -69,7 +67,7 @@ public class MvnScanner {
     /**
      * Objects to be saved to DB.
      */
-    private List<Artifactinfo> dbList = new ArrayList<>();
+    private List<MvnRecord> dbList = new ArrayList<>();
 
     @Inject
     public MvnScanner(URI indexFolder) {
@@ -167,21 +165,11 @@ public class MvnScanner {
 
                     this.store(true, i);
                 }
-
             }
         }
     }
 
     private void add(JsonObject jobj, long i) {
-
-        if (!jobj.has(org.apache.maven.index.reader.Record.SHA1.getName())) {
-            LOG.log(Level.WARNING, "Record #" + i + " skipped due to no SHA1 field: " + jobj.toString()); 
-            return;
-        }
-
-        String sha1String = jobj.get(org.apache.maven.index.reader.Record.SHA1.getName()).getAsString();
-        byte[] sha1Md5 = DigestUtils.md5(sha1String);
-
         try (EntityManager em = emf.createEntityManager()) {
             /*
             TypedQuery<Artifactinfo> query = em.createNamedQuery("Artifactinfo.findBySha1Md5", Artifactinfo.class);
@@ -196,15 +184,9 @@ public class MvnScanner {
             VersionAnalyser verAr = new VersionAnalyser(jobj.get(org.apache.maven.index.reader.Record.VERSION.getName()).getAsString());
 
             // Prepare the Entity Object
-            Artifactinfo dbAi = new Artifactinfo(sha1Md5);
+            MvnRecord dbAi = new MvnRecord(i);
             dbAi.setMajorVersion(verAr.getMajorVersion());
             dbAi.setVersionSeq(BigInteger.valueOf(verAr.getVersionSeq()));
-            dbAi.setClassifierLength(StringUtils.length(jobj.get(org.apache.maven.index.reader.Record.CLASSIFIER.getName()).getAsString()));
-
-            dbAi.setSignatureExists(jobj.get(org.apache.maven.index.reader.Record.HAS_SIGNATURE.getName()).getAsBoolean() ? 1 : 0);
-            dbAi.setSourcesExists(jobj.get(org.apache.maven.index.reader.Record.HAS_SOURCES.getName()).getAsBoolean() ? 1 : 0);
-            dbAi.setJavadocExists(jobj.get(org.apache.maven.index.reader.Record.HAS_JAVADOC.getName()).getAsBoolean() ? 1 : 0);
-
             dbAi.setJson(jobj.toString());
 
             // Add to DB To be saved List
