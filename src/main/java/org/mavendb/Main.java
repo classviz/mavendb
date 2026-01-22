@@ -16,7 +16,6 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.codehaus.plexus.util.StringUtils;
-import org.eclipse.persistence.config.PersistenceUnitProperties;
 
 /**
  * Entrance of the application.
@@ -80,9 +79,6 @@ public class Main {
      */
     private static Properties loadConfig() throws IOException {
 
-        // Set Properties
-        Properties config = new Properties();
-
         // Get the config file name
         String configFileName = Main.getDirectoryFileName(DIR_ETC, CONFIG_FILE);
 
@@ -92,28 +88,7 @@ public class Main {
             configValues.load(br);
         }
 
-        String jdbcUrl = configValues.getProperty(PersistenceUnitProperties.JDBC_URL);
-        if (StringUtils.isNotBlank(System.getenv(DockerEnv.MAVENDB_MYSQL_HOST.name()))) {
-            jdbcUrl = jdbcUrl.replace("127.0.0.1", System.getenv(DockerEnv.MAVENDB_MYSQL_HOST.name()));
-        }
-        if (StringUtils.isNotBlank(System.getenv(DockerEnv.MAVENDB_MYSQL_PORT.name()))) {
-            jdbcUrl = jdbcUrl.replace("3306", System.getenv(DockerEnv.MAVENDB_MYSQL_PORT.name()));
-        }
-
-        // Set JDBC URL
-        config.setProperty(PersistenceUnitProperties.JDBC_URL, jdbcUrl);
-
-        // Set JDBC User
-        config.setProperty(PersistenceUnitProperties.JDBC_USER, StringUtils.isBlank(System.getenv(DockerEnv.MAVENDB_MYSQL_USER.name()))
-                ? configValues.getProperty(PersistenceUnitProperties.JDBC_USER)
-                : System.getenv(DockerEnv.MAVENDB_MYSQL_USER.name()));
-
-        // Set JDBC Pass
-        config.setProperty(PersistenceUnitProperties.JDBC_PASSWORD, StringUtils.isBlank(System.getenv(DockerEnv.MAVENDB_MYSQL_PASS.name()))
-                ? configValues.getProperty(PersistenceUnitProperties.JDBC_PASSWORD)
-                : System.getenv(DockerEnv.MAVENDB_MYSQL_PASS.name()));
-
-        return config;
+        return configValues;
     }
 
     /**
@@ -140,12 +115,18 @@ public class Main {
             return;
         }
 
-        if (line.hasOption(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT)) {
-            String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
-            new MvnScanner(URI.create(reposFolder)).perform(loadConfig());
-        } else {
+        String dbString = line.getOptionValue(CommandOptions.OPTION_DB_TYPE_LONGOPT).toUpperCase();
+        DatabaseType dbType;
+        try {
+            dbType = Enum.valueOf(DatabaseType.class, dbString);
+        } catch (IllegalArgumentException e) {
+            LOG.log(Level.SEVERE, "Unsupported database type: " + dbString, e);
             Main.printHelp();
+            return;
         }
+
+        String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
+        new MvnScanner(URI.create(reposFolder), dbType).perform(loadConfig());
 
         LOG.log(Level.INFO, "Finished");
 
@@ -169,36 +150,57 @@ public class Main {
          * Command line options.
          */
         private static final Options OPTIONS = new Options();
+
         /**
          * Command line option: Maven Repos name long name format.
          */
         private static final String OPTION_REPOS_FOLDER_LONGOPT = "reposfolder";
+
+        /**
+         * Command line option: Database type long name format.
+         */
+        private static final String OPTION_DB_TYPE_LONGOPT = "dbtype";
+
+        /**
+         * Command line option: Maven Repos name to scan, like central, spring.
+         */
+        private static final Option OPTION_DB_TYPE = Option.builder("d")
+            .longOpt(OPTION_DB_TYPE_LONGOPT)
+            .hasArg()
+            .desc("Database type, like mysql, mongodb.")
+            .required()
+            .get();
         /**
          * Command line option: Maven Repos name to scan, like central, spring.
          */
         @SuppressWarnings(value="UUF_UNUSED_FIELD")
-        private static final Option OPTION_RESPOSNAME = new Option("f", OPTION_REPOS_FOLDER_LONGOPT, true, "Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties. Example values: central, spring");
+        private static final Option OPTION_RESPOSNAME = Option.builder("f")
+            .longOpt(OPTION_REPOS_FOLDER_LONGOPT)
+            .hasArg()
+            .desc("Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties.")
+            .required()
+            .get();
         /**
          * Command line option: print help information.
          */
-        private static final Option OPTION_HELP = new Option("h", "help", false, "Printout help information");
+        private static final Option OPTION_HELP = Option.builder("h")
+            .longOpt("help")
+            .hasArg(false)
+            .desc("Printout help information")
+            .get();
 
         private CommandOptions() {
         }
 
         static {
+            OPTIONS.addOption(OPTION_DB_TYPE);
             OPTIONS.addOption(OPTION_RESPOSNAME);
             OPTIONS.addOption(OPTION_HELP);
         }
     }
 
-    /**
-     * Docker environment variables.
-     */
-    enum DockerEnv {
-        MAVENDB_MYSQL_HOST,
-        MAVENDB_MYSQL_PORT,
-        MAVENDB_MYSQL_USER,
-        MAVENDB_MYSQL_PASS;
+    static enum DatabaseType {
+        MYSQL,
+        MONGODB
     }
 }

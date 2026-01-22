@@ -5,9 +5,10 @@ rm -rf dist/ target/
 mvn clean package install
 
 # Generate javadoc
-mvn javadoc:javadoc
+#mvn javadoc:javadoc
 
-# Upgradable 3rd party libs
-mvn dependency:tree org.codehaus.mojo:versions-maven-plugin:2.18.0:display-dependency-updates
+# 3rd party dependencies
+mvn dependency:copy-dependencies
+mvn versions:display-dependency-updates
 
 cd dist && unzip *.zip

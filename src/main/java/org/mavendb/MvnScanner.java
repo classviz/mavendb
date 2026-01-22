@@ -1,8 +1,10 @@
 package org.mavendb;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
 import jakarta.persistence.FlushModeType;
@@ -25,10 +27,10 @@ import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.inject.Inject;
 import javax.inject.Named;
 import javax.inject.Singleton;
 import org.apache.commons.lang3.math.NumberUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.ChunkReader;
 import org.apache.maven.index.reader.IndexReader;
@@ -37,6 +39,8 @@ import org.apache.maven.index.reader.ResourceHandler;
 import org.apache.maven.index.reader.WritableResourceHandler;
 import org.apache.maven.index.reader.resource.PathWritableResourceHandler;
 import org.apache.maven.index.reader.resource.UriResourceHandler;
+import org.bson.Document;
+import org.mavendb.Main.DatabaseType;
 
 /**
  * Scan all artifacts in maven repository.
@@ -51,13 +55,12 @@ public class MvnScanner {
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
     private static final String ENTITY_MANAGER_FACTORY = "PUMvn";
 
-    /**
-     * Utility to convert to JSON string.
-     */
-    private static final Gson JSON = new Gson();
-    private static final int STORE_PACKAGE_SIZE = 1000000;
-
     private final URI indexFolder;
+    private final DatabaseType dbType;
+
+    /* ------- MySQL ------- */
+
+    private static final int BATCH_SIZE_MYSQL = 1000000;
 
     /**
      * Database store factory.
@@ -69,16 +72,23 @@ public class MvnScanner {
      */
     private List<MvnRecord> dbList = new ArrayList<>();
 
-    @Inject
-    public MvnScanner(URI indexFolder) {
+    /* ------- MongoDB ------- */
+
+
+    public MvnScanner(URI indexFolder, DatabaseType dbType) {
         this.indexFolder = indexFolder;
+        this.dbType = dbType;
     }
 
     public void perform(Properties config) throws IOException {
-        this.emf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
 
-        // Prepare Schema
-        this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB, Main.DB_CREATE_SQL));
+        if (this.dbType == DatabaseType.MYSQL) {
+            this.emf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
+            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB, Main.DB_CREATE_SQL));
+        } else if (this.dbType == DatabaseType.MONGODB) {
+            MongoClient client = MongoClients.create(config.getProperty("com.mongodb.client.uri"));
+
+        }
 
         long start = System.currentTimeMillis();
         this.stepScan();
@@ -134,59 +144,52 @@ public class MvnScanner {
                 LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
 
                 // List one by one all recordsin the chunk
-                try (chunkReader) {
-                    final RecordExpander recordExpander = new RecordExpander();
-                    long i = 0;
-                    for (Map<String, String> rec : chunkReader) {
-                        i++;
-                        final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
-                        JsonObject jsonObject = new JsonObject();
-                        record.getExpanded().forEach((k, v) -> {
-                            if (k.getProto().equals(String.class)) {
-                                jsonObject.addProperty(k.getName(), record.getString(k));
-                            } else if (k.getProto().equals(String[].class)) {
-                                JsonArray stringArray = new JsonArray();
-                                for (String s : record.getStringArray(k)) {
-                                    stringArray.add(s);
-                                }
-                                jsonObject.add(k.getName(), stringArray);
-                            } else if (k.getProto().equals(Long.class)) {
-                                jsonObject.addProperty(k.getName(), record.getLong(k));
-                            } else if (k.getProto().equals(Boolean.class)) {
-                                jsonObject.addProperty(k.getName(), record.getBoolean(k));
-                            } else {
-                                LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
+                final RecordExpander recordExpander = new RecordExpander();
+                long i = 0;
+                for (Map<String, String> rec : chunkReader) {
+                    i++;
+                    final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
+                    JsonObject jsonObject = new JsonObject();
+                    record.getExpanded().forEach((k, v) -> {
+                        if (k.getProto().equals(String.class)) {
+                            jsonObject.addProperty(k.getName(), record.getString(k));
+                        } else if (k.getProto().equals(String[].class)) {
+                            JsonArray stringArray = new JsonArray();
+                            for (String s : record.getStringArray(k)) {
+                                stringArray.add(s);
                             }
-                        });
+                            jsonObject.add(k.getName(), stringArray);
+                        } else if (k.getProto().equals(Long.class)) {
+                            jsonObject.addProperty(k.getName(), record.getLong(k));
+                        } else if (k.getProto().equals(Boolean.class)) {
+                            jsonObject.addProperty(k.getName(), record.getBoolean(k));
+                        } else {
+                            LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
+                        }
+                    });
 
-                        this.add(jsonObject, i);
-                        this.store(false, i);
+                    String versioString = record.getString(org.apache.maven.index.reader.Record.VERSION);
+                    if (StringUtils.isBlank(versioString)) {
+                        LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
+                        continue;
                     }
+                    VersionAnalyser analizedVersion = new VersionAnalyser(versioString);
 
-                    this.store(true, i);
+
+                    this.add(jsonObject, analizedVersion, i);
+                    this.store(false, i);
                 }
+                this.store(true, i);
             }
         }
     }
 
-    private void add(JsonObject jobj, long i) {
+    private void add(JsonObject jobj, VersionAnalyser analizedVersion, long i) {
         try (EntityManager em = emf.createEntityManager()) {
-            /*
-            TypedQuery<Artifactinfo> query = em.createNamedQuery("Artifactinfo.findBySha1Md5", Artifactinfo.class);
-            query.setHint(QueryHints.READ_ONLY, HintValues.TRUE);
-            query.setHint(QueryHints.CACHE_STORE_MODE, CacheStoreMode.BYPASS);  // Don't insert into cache
-            query.setParameter("sha1Md5", sha1Md5);
-
-            List<Artifactinfo> result = query.getResultList();
-            if (result != null && !result.isEmpty()) {
-            */
-
-            VersionAnalyser verAr = new VersionAnalyser(jobj.get(org.apache.maven.index.reader.Record.VERSION.getName()).getAsString());
-
             // Prepare the Entity Object
             MvnRecord dbAi = new MvnRecord(i);
-            dbAi.setMajorVersion(verAr.getMajorVersion());
-            dbAi.setVersionSeq(BigInteger.valueOf(verAr.getVersionSeq()));
+            dbAi.setMajorVersion(analizedVersion.getMajorVersion());
+            dbAi.setVersionSeq(BigInteger.valueOf(analizedVersion.getVersionSeq()));
             dbAi.setJson(jobj.toString());
 
             // Add to DB To be saved List
@@ -207,9 +210,9 @@ public class MvnScanner {
             return;
         }
 
-        // Save STORE_PACKAGE_SIZE records as a group,
+        // Save BATCH_SIZE_MYSQL records as a group,
         // Or when force save, save it no matter of the size
-        if (this.dbList.size() >= STORE_PACKAGE_SIZE || force) {
+        if (this.dbList.size() >= BATCH_SIZE_MYSQL || force) {
             try (EntityManager em = this.emf.createEntityManager()) {
                 LocalDateTime begin = LocalDateTime.now();
                 em.setFlushMode(FlushModeType.COMMIT);
@@ -283,6 +286,12 @@ public class MvnScanner {
          */
         @SuppressWarnings({"checkstyle:MagicNumber", "java:S3776"}) // java:S3776 - Cognitive Complexity of methods should not be too high
         private VersionAnalyser(final String version) {
+            if (version == null) {
+                this.majorVersionResult = 0;
+                this.versionSeqResult = 0;
+                return;
+            }
+
             String majorVersionStr = "";
             long majorVersion = 0;
             long minorVersion = 0;

@@ -1,9 +1,9 @@
 # Maven repository to DB
 
 This application will scan all `maven` repos items and store them to database. Supported database
+- `MongoDB`
 - `MySQL`
 - `sqlite`
-- `MongoDB`
 
 ## Prepare Database
 

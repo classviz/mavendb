@@ -1,12 +1,12 @@
 #!/bin/bash
+#
 
 # Clean Docker containers, if exists
-sudo docker compose down --rmi local
+sudo docker compose -f compose-mysql.yml down --rmi local
 sudo rm -rf mysql-files
-sudo rm -rf mysql-data
 
 # Create Docker containers
-sudo docker compose up -d
+sudo docker compose -f compose-mysql.yml up -d
 
 echo  "Waiting for mysql to be ready"
 sleep 30
