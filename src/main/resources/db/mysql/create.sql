@@ -34,12 +34,11 @@ CREATE TABLE         `gav` (
   `size`                         bigint                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.size"`',
   `sha1`                           char(  40) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.sha1"`',
 
-  `signature_exists`                int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.signatureExists"` or From [record]-`signature_exists`, Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `sources_exists`                  int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.sourcesExists"`   or From [record]-`sources_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
-  `javadoc_exists`                  int                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.javadocExists"`   or From [record]-`javadoc_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `signature_exists`            BOOLEAN                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.signatureExists"` or From [record]-`signature_exists`, Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `sources_exists`              BOOLEAN                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.sourcesExists"`   or From [record]-`sources_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
+  `javadoc_exists`              BOOLEAN                           DEFAULT NULL COMMENT 'From [record]-`json->>"$.javadocExists"`   or From [record]-`javadoc_exists`,   Values: NOT_PRESENT(0), PRESENT(1), NOT_AVAILABLE(2)',
 
   `classifier`                  varchar( 128) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.classifier"`',      -- 2023.02.12  Max     54
-  `classifier_length`               int                           DEFAULT NULL COMMENT 'From [record]-`classifier_length`',
   `file_extension`              varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.fileExtension"`',   -- 2023.02.12  Max    113
   `packaging`                   varchar( 254) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.packaging"`',       -- 2023.02.12  Max    113
   `name`                        varchar(1024) COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'From [record]-`json->>"$.name"`',            -- 2023.02.12  Max    190
@@ -57,7 +56,7 @@ CREATE TABLE         `g` (
   `artifact_version_counter`        int                           DEFAULT NULL,
   `major_version_counter`           int                           DEFAULT NULL,
   `version_seq_max`              bigint                           DEFAULT NULL,
-  `last_modified_max`              DATE                           DEFAULT NULL,
+  `last_modified_max`          DATETIME                           DEFAULT NULL,
   `group_id_left1`              varchar(128) COLLATE utf8mb4_bin GENERATED ALWAYS AS (substring_index(`group_id`,'.',1)) VIRTUAL,
   `group_id_left2`              varchar(254) COLLATE utf8mb4_bin GENERATED ALWAYS AS (substring_index(`group_id`,'.',2)) VIRTUAL,
   `group_id_left3`              varchar(254) COLLATE utf8mb4_bin GENERATED ALWAYS AS (substring_index(`group_id`,'.',3)) VIRTUAL,
@@ -79,7 +78,7 @@ CREATE TABLE         `ga` (
   `artifact_version_counter`        int                           DEFAULT NULL,
   `major_version_counter`           int                           DEFAULT NULL,
   `version_seq_max`              bigint                           DEFAULT NULL,
-  `last_modified_max`              DATE                           DEFAULT NULL,
+  `last_modified_max`          DATETIME                           DEFAULT NULL,
 
   PRIMARY KEY (`group_id`,`artifact_id`)
 ) ENGINE=InnoDB COLLATE=utf8mb4_bin COMMENT='Groups Artifact';

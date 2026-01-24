@@ -16,7 +16,7 @@ select concat(now(), ' Started');
 --        We need to watch out the errors in case happens
 TRUNCATE TABLE gav;
 INSERT INTO    gav(
-  uinfo,
+  seqid,
 
   group_id,
   artifact_id,
@@ -34,14 +34,13 @@ INSERT INTO    gav(
   javadoc_exists,
 
   classifier,
-  classifier_length,
   file_extension,
   packaging,
   `name`,
   description
 )
 SELECT
-  uinfo,
+  seqid,
 
   json->>"$.groupId"                              AS group_id,
   json->>"$.artifactId"                           AS artifact_id,
@@ -50,21 +49,32 @@ SELECT
   major_version,
   version_seq,
 
-  FROM_UNIXTIME(json->>"$.lastModified" / 1000)   AS last_modified,
-  json->>"$.size"                                 AS `size`,
+  FROM_UNIXTIME(json->>"$.recordModified" / 1000) AS last_modified,
+  json->>"$.fileSize"                             AS `size`,
   left(json->>"$.sha1", 40)                       AS sha1,
 
-  signature_exists,
-  sources_exists,
-  javadoc_exists,
+  CASE
+        WHEN json->>"$.hasSignature" = 'true' THEN TRUE
+        WHEN json->>"$.hasSignature" = 'false' THEN FALSE
+        ELSE NULL -- Handle cases that are not 'true' or 'false'
+    END                                           AS signature_exists,
+  CASE
+        WHEN json->>"$.hasSources" = 'true' THEN TRUE
+        WHEN json->>"$.hasSources" = 'false' THEN FALSE
+        ELSE NULL -- Handle cases that are not 'true' or 'false'
+    END                                           AS sources_exists,
+  CASE
+        WHEN json->>"$.hasJavadoc" = 'true' THEN TRUE
+        WHEN json->>"$.hasJavadoc" = 'false' THEN FALSE
+        ELSE NULL -- Handle cases that are not 'true' or 'false'
+    END                                           AS javadoc_exists,
 
   json->>"$.classifier"                           AS classifier,
-  classifier_length,
   json->>"$.fileExtension"                        AS file_extension,
   json->>"$.packaging"                            AS packaging,
   json->>"$.name"                                 AS `name`,
   json->>"$.description"                          AS description
-FROM artifactinfo
+FROM record
 ;
 select concat(now(), ' Table gav refresh data finished');
 

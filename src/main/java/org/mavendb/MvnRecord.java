@@ -16,16 +16,16 @@ import org.eclipse.persistence.annotations.CacheType;
  * JPA Persistent class for table <code>artifactinfo</code>.
  */
 @Entity
-@Table(name = "record")
+@Table(name = MvnRecord.TABLE_NAME)
 @Cache(type = CacheType.NONE)  // Does not preserve object identity and does not cache objects.
 @NamedQueries({
-    @NamedQuery(name = "MvnRecord.findAll", query = "SELECT a FROM MvnRecord a")
-    , @NamedQuery(name = "MvnRecord.findBySeqid", query = "SELECT a FROM MvnRecord a WHERE a.seqid = :seqid")
-    , @NamedQuery(name = "MvnRecord.findByMajorVersion", query = "SELECT a FROM MvnRecord a WHERE a.majorVersion = :majorVersion")
+    @NamedQuery(name = "MvnRecord.findBySeqid", query = "SELECT a FROM MvnRecord a WHERE a.seqid = :seqid"),
+    @NamedQuery(name = "MvnRecord.findByMajorVersion", query = "SELECT a FROM MvnRecord a WHERE a.majorVersion = :majorVersion")
 })
 public class MvnRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
+    public static final String TABLE_NAME = "record";
 
     @Id
     @Basic(optional = false)

@@ -2,13 +2,23 @@ param (
     [Parameter(Mandatory=$true)]
     [string]$reposFolder
 )
+param (
+    [Parameter(Mandatory=$true)]
+    [string]$dbType
+)
 
 if (-not $reposFolder) {
-    Write-Host "Error: repository is requreid, example value: central spring"
+    Write-Host "Error: repository folder is requreid"
+    exit 1
+}
+
+if (-not $dbType) {
+    Write-Host "Error: database type is required"
     exit 1
 }
 
 Write-Host "Mvn Repository Name to scan: $reposFolder"
+Write-Host "Database Type: $dbType"
 
 java -showversion `
  -verbose:gc `
@@ -30,4 +40,4 @@ java -showversion `
  -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile `
  -Xmx16g `
  -server `
- -jar ../mavendb.jar -f $reposFolder
+ -jar ../mavendb.jar -f $reposFolder -d $dbType

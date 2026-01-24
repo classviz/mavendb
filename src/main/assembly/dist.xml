@@ -38,8 +38,8 @@
             </includes>
         </fileSet>
         <fileSet>
-            <directory>${project.build.directory}/db</directory>
-            <outputDirectory>db</outputDirectory>
+            <directory>${project.build.directory}/db/mysql</directory>
+            <outputDirectory>db/mysql</outputDirectory>
             <includes>
                 <include>*.sql</include>
             </includes>

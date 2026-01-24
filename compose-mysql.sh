@@ -5,6 +5,9 @@
 sudo docker compose -f compose-mysql.yml down --rmi local
 sudo rm -rf mysql-files
 
+# Clean unused Docker volumes
+sudo docker volume prune -a -f
+
 # Create Docker containers
 sudo docker compose -f compose-mysql.yml up -d
 

@@ -1,7 +1,5 @@
 package org.mavendb;
 
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 
@@ -24,12 +22,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.StringTokenizer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.inject.Named;
-import javax.inject.Singleton;
-import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.ChunkReader;
@@ -47,9 +41,7 @@ import org.mavendb.Main.DatabaseType;
  *
  * @see <a href="https://github.com/apache/maven-indexer/blob/master/indexer-reader/src/test/java/org/apache/maven/index/reader/IndexReaderTest.java">IndexReaderTest</a>
  */
-@Singleton
-@Named
-public class MvnScanner {
+public class MvnScanner implements AutoCloseable {
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
@@ -57,37 +49,136 @@ public class MvnScanner {
 
     private final URI indexFolder;
     private final DatabaseType dbType;
+    /**
+     * Maven repo Index ID.
+     * The value is the property "nexus.index.id" in nexus-maven-repository-index.properties file.
+     * Example: central.
+     */
+    private String indexId;
 
     /* ------- MySQL ------- */
-
-    private static final int BATCH_SIZE_MYSQL = 1000000;
 
     /**
      * Database store factory.
      */
-    private EntityManagerFactory emf;
+    private EntityManagerFactory mysqlEmf;
 
     /**
      * Objects to be saved to DB.
      */
-    private List<MvnRecord> dbList = new ArrayList<>();
+    private List<MvnRecord> mysqlList = new ArrayList<>();
+
+    /**
+     * Batch size for MySQL operations.
+     */
+    private int batchSizeMysql;
 
     /* ------- MongoDB ------- */
 
+    /**
+     * MongoDB client for storing documents.
+     */
+    private MongoClient mongoClient;
 
-    public MvnScanner(URI indexFolder, DatabaseType dbType) {
+    /**
+     * MongoDB database name.
+     */
+    private String mongoDatabase;
+
+    /**
+     * MongoDB documents to be saved to DB.
+     */
+    private List<Document> mongoDocList = new ArrayList<>();
+
+    /**
+     * Batch size for MongoDB operations.
+     */
+    private int batchSizeMongodb;
+
+    /**
+     * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
+     */
+    private MvnScanner(URI indexFolder, DatabaseType dbType) {
         this.indexFolder = indexFolder;
         this.dbType = dbType;
     }
 
+    /**
+     * Factory method to safely create a MvnScanner instance.
+     * Validates the index folder path before object construction to prevent
+     * partially initialized objects vulnerable to finalizer attacks.
+     *
+     * @param folderPath The folder path to scan
+     * @param dbType The database type to use
+     * @return A validated MvnScanner instance
+     * @throws IllegalArgumentException if the path is invalid or contains suspicious patterns
+     */
+    public static MvnScanner create(String folderPath, DatabaseType dbType) throws IllegalArgumentException {
+        URI validatedUri = validateAndCreateURI(folderPath);
+        return new MvnScanner(validatedUri, dbType);
+    }
+
+    /**
+     * Validates the index folder path and converts it to a safe URI.
+     * Ensures the path is not null, empty, and doesn't contain path traversal attempts.
+     *
+     * @param folderPath The folder path to validate
+     * @return A validated URI
+     * @throws IllegalArgumentException if the path is invalid or contains suspicious patterns
+     */
+    private static URI validateAndCreateURI(String folderPath) throws IllegalArgumentException {
+        if (StringUtils.isBlank(folderPath)) {
+            throw new IllegalArgumentException("Index folder path cannot be null or empty");
+        }
+
+        // Check for common path traversal patterns
+        if (folderPath.contains("..") || folderPath.contains("~")) {
+            throw new IllegalArgumentException("Index folder path contains suspicious patterns: " + folderPath);
+        }
+
+        try {
+            URI uri = URI.create(folderPath);
+
+            // Validate URI scheme for file:// URIs
+            if (uri.getScheme() != null && uri.getScheme().equals("file")) {
+                // Normalize and validate file path
+                Path path = Path.of(uri);
+                // Ensure the path exists and is accessible
+                if (!Files.exists(path)) {
+                    throw new IllegalArgumentException("Index folder path does not exist: " + folderPath);
+                }
+                if (!Files.isDirectory(path)) {
+                    throw new IllegalArgumentException("Index folder path is not a directory: " + folderPath);
+                }
+                if (!Files.isReadable(path)) {
+                    throw new IllegalArgumentException("Index folder path is not readable: " + folderPath);
+                }
+            } else if (uri.getScheme() != null) {
+                // For remote URIs (http, https, etc.), basic validation
+                if (!uri.getScheme().matches("^[a-zA-Z][a-zA-Z0-9+.-]*$")) {
+                    throw new IllegalArgumentException("Invalid URI scheme: " + uri.getScheme());
+                }
+            }
+
+            return uri;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid index folder path: " + folderPath, e);
+        }
+    }
+
     public void perform(Properties config) throws IOException {
+        // Load batch size configurations
+        this.batchSizeMysql = Integer.parseInt(config.getProperty("batch.size.mysql", "1000000"));
+        this.batchSizeMongodb = Integer.parseInt(config.getProperty("batch.size.mongodb", "2000000"));
 
         if (this.dbType == DatabaseType.MYSQL) {
-            this.emf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
-            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB, Main.DB_CREATE_SQL));
+            this.mysqlEmf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
+            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_MYSQL_CREATE_SQL));
         } else if (this.dbType == DatabaseType.MONGODB) {
-            MongoClient client = MongoClients.create(config.getProperty("com.mongodb.client.uri"));
-
+            this.mongoClient = MongoClients.create(config.getProperty("com.mongodb.client.uri"));
+            this.mongoDatabase = config.getProperty("com.mongodb.database.name", "mavendb");
         }
 
         long start = System.currentTimeMillis();
@@ -95,7 +186,9 @@ public class MvnScanner {
         LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
         // Refresh Data
-        this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB, Main.DB_DATA_REFRESH_SQL));
+        if (this.dbType == DatabaseType.MYSQL) {
+            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_MYSQL_DATA_REFRESH_SQL));
+        }
     }
 
     /**
@@ -104,7 +197,9 @@ public class MvnScanner {
      * @see <a href="https://wiki.eclipse.org/EclipseLink/Examples/JPA/EMAPI#Getting_a_JDBC_Connection_from_an_EntityManager">Getting a JDBC Connection from an EntityManager</a>
      */
     private void stepExecuteSQLScript(String script) throws IOException{
-        try (EntityManager em = emf.createEntityManager(); Reader r = new FileReader(script, StandardCharsets.UTF_8)) {
+        try (EntityManager em = mysqlEmf.createEntityManager();
+             Reader r = new FileReader(script, StandardCharsets.UTF_8)
+        ) {
             em.getTransaction().begin();
 
             LOG.log(Level.INFO, "SQL {0} execution started", script);
@@ -114,6 +209,8 @@ public class MvnScanner {
             LOG.log(Level.INFO, "SQL {0} execution finished, execution time {1} ms", new Object[]{script, System.currentTimeMillis() - start});
 
             em.getTransaction().commit();
+        } catch (Exception e) {
+            throw new RuntimeException("SQL script execution failed: " + script, e);
         }
     }
 
@@ -132,6 +229,7 @@ public class MvnScanner {
             WritableResourceHandler local = new PathWritableResourceHandler(tempDir);
             IndexReader indexReader = new IndexReader(local, remote)
         ) {
+            this.indexId = indexReader.getIndexId();
             LOG.log(Level.INFO,"indexRepoId=" + indexReader.getIndexId());
             LOG.log(Level.INFO,"indexLastPublished=" + indexReader.getPublishedTimestamp());
             LOG.log(Level.INFO,"isIncremental=" + indexReader.isIncremental());
@@ -145,57 +243,60 @@ public class MvnScanner {
 
                 // List one by one all recordsin the chunk
                 final RecordExpander recordExpander = new RecordExpander();
-                long i = 0;
+                long recordSeq = 0;
                 for (Map<String, String> rec : chunkReader) {
-                    i++;
+                    recordSeq++;
                     final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
-                    JsonObject jsonObject = new JsonObject();
+                    Document jsonDoc = new Document("_id", recordSeq);
                     record.getExpanded().forEach((k, v) -> {
                         if (k.getProto().equals(String.class)) {
-                            jsonObject.addProperty(k.getName(), record.getString(k));
+                            jsonDoc.append(k.getName(), record.getString(k));
                         } else if (k.getProto().equals(String[].class)) {
-                            JsonArray stringArray = new JsonArray();
+                            List<String> stringList = new ArrayList<>();
                             for (String s : record.getStringArray(k)) {
-                                stringArray.add(s);
+                                stringList.add(s);
                             }
-                            jsonObject.add(k.getName(), stringArray);
+                            jsonDoc.append(k.getName(), stringList);
                         } else if (k.getProto().equals(Long.class)) {
-                            jsonObject.addProperty(k.getName(), record.getLong(k));
+                            jsonDoc.append(k.getName(), record.getLong(k));
                         } else if (k.getProto().equals(Boolean.class)) {
-                            jsonObject.addProperty(k.getName(), record.getBoolean(k));
+                            jsonDoc.append(k.getName(), record.getBoolean(k));
                         } else {
                             LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
                         }
                     });
 
-                    String versioString = record.getString(org.apache.maven.index.reader.Record.VERSION);
-                    if (StringUtils.isBlank(versioString)) {
+                    String versionString = record.getString(org.apache.maven.index.reader.Record.VERSION);
+                    if (StringUtils.isBlank(versionString)) {
                         LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
                         continue;
                     }
-                    VersionAnalyser analizedVersion = new VersionAnalyser(versioString);
+                    VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
 
-
-                    this.add(jsonObject, analizedVersion, i);
-                    this.store(false, i);
+                    this.add(jsonDoc, analyzedVersion, recordSeq);
+                    this.store(false, recordSeq);
                 }
-                this.store(true, i);
+                this.store(true, recordSeq);
             }
         }
     }
 
-    private void add(JsonObject jobj, VersionAnalyser analizedVersion, long i) {
-        try (EntityManager em = emf.createEntityManager()) {
+    private void add(Document jsonDocument, VersionAnalyser analizedVersion, long recordSeq) {
+        if (this.dbType == DatabaseType.MYSQL) {
             // Prepare the Entity Object
-            MvnRecord dbAi = new MvnRecord(i);
+            MvnRecord dbAi = new MvnRecord(recordSeq);
             dbAi.setMajorVersion(analizedVersion.getMajorVersion());
             dbAi.setVersionSeq(BigInteger.valueOf(analizedVersion.getVersionSeq()));
-            dbAi.setJson(jobj.toString());
+            dbAi.setJson(jsonDocument.toJson());
 
             // Add to DB To be saved List
-            this.dbList.add(dbAi);
-
-            em.clear();
+            this.mysqlList.add(dbAi);
+        } else if (this.dbType == DatabaseType.MONGODB) {
+            // Store jsonObject into MongoDB batch list
+            jsonDocument.append("majorVersion", analizedVersion.getMajorVersion());
+            jsonDocument.append("versionSeq", analizedVersion.getVersionSeq());
+            // Add to MongoDB batch list for batch processing
+            this.mongoDocList.add(jsonDocument);
         }
     }
 
@@ -205,186 +306,53 @@ public class MvnScanner {
      * @param force Flag to force save or not
      */
     private void store(final boolean force, final long counter) throws IOException {
-        // Nothing to be saved
-        if (this.dbList.isEmpty()) {
-            return;
-        }
-
-        // Save BATCH_SIZE_MYSQL records as a group,
-        // Or when force save, save it no matter of the size
-        if (this.dbList.size() >= BATCH_SIZE_MYSQL || force) {
-            try (EntityManager em = this.emf.createEntityManager()) {
-                LocalDateTime begin = LocalDateTime.now();
-                em.setFlushMode(FlushModeType.COMMIT);
-                em.getTransaction().begin();
-                this.dbList.forEach(em::persist);
-                em.getTransaction().commit();
-                em.clear();
-
-                Duration duration = Duration.between(begin, LocalDateTime.now());
-                LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}", new Object[]{counter, duration.toSeconds()});
-            }
-
-            // Clear the Cached Object
-            this.dbList.clear();
-            this.dbList = new ArrayList<>(); // Add the code to avoid - java.lang.OutOfMemoryError: GC overhead limit exceeded
-        }
-    }
-
-    /**
-     * Version string analysis result.
-     */
-    private static final class VersionAnalyser {
-
-        private static final long MAJOR_VERSION_MAX = 922;
-        private static final long MAJOR_VERSION_MAX_YEAR = 9223372036L;
-        private static final int RADIX_DECIMAL = 10;
-        /**
-         * Length of a year string. Example: in <code>2000.01.01</code>, so
-         * year's length is 4.
-         */
-        private static final int YEAR_LENGTH = 10;
-
-        private static final String DOT = ".";
-        private static final String DOTS = "..";
-
-        /**
-         * The major version of the artifact. We don't expect the major version
-         * is too big, usually it is 1, 2, 3, etc.
-         */
-        private final int majorVersionResult;
-        private final long versionSeqResult;
-
-        /**
-         * Get maven version sequence. The value is generated by the following
-         * logic:
-         *
-         * <pre>
-         *   9,22 3,372,036,854,775,807
-         *  |- --|- ---|--- ---|--- ---|
-         *   Maj  Min  Incre   4th
-         *
-         * The left 4 digits are Major Version;
-         * then 3 digits are Minor Version;
-         * then 6 digits are Incremental Version;
-         * then the last 4 digits are the fourth Version.
-         * </pre>
-         *
-         * Well in case we suspect the version is a date format, it will be:
-         *
-         * <pre>
-         *   9,223,372,036,854,775,807
-         *   - --- --- ---|--- ---|---|
-         *            Year   Month Date
-         * Example version text
-         * - com.hack23.cia           | citizen-intelligence-agency | 2016.12.13
-         * - org.everit.osgi.dev.dist | eosgi-dist-felix_5.2.0      | v201604220928
-         * - berkano                  | berkano-sample              | 20050805.042414
-         * </pre>
-         *
-         * @param version Version string
-         */
-        @SuppressWarnings({"checkstyle:MagicNumber", "java:S3776"}) // java:S3776 - Cognitive Complexity of methods should not be too high
-        private VersionAnalyser(final String version) {
-            if (version == null) {
-                this.majorVersionResult = 0;
-                this.versionSeqResult = 0;
+        if (this.dbType == DatabaseType.MYSQL) {
+            // Nothing to be saved
+            if (this.mysqlList.isEmpty()) {
                 return;
             }
 
-            String majorVersionStr = "";
-            long majorVersion = 0;
-            long minorVersion = 0;
-            long increVersion = 0;
-            long four4Version = 0;
+            // Save batchSizeMysql records as a group,
+            // Or when force save, save it no matter of the size
+            if (this.mysqlList.size() >= this.batchSizeMysql || force) {
+                try (EntityManager em = this.mysqlEmf.createEntityManager()) {
+                    LocalDateTime begin = LocalDateTime.now();
+                    em.setFlushMode(FlushModeType.COMMIT);
+                    em.getTransaction().begin();
+                    this.mysqlList.forEach(em::persist);
+                    em.getTransaction().commit();
 
-            String versionTemp = version.replaceAll("[^\\d.]", DOT);
-            if (versionTemp.contains(DOT)) {
-                while (versionTemp.contains(DOTS)) {
-                    versionTemp = versionTemp.replace(DOTS, DOT);
+                    Duration duration = Duration.between(begin, LocalDateTime.now());
+                    LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}", new Object[]{counter, duration.toSeconds()});
                 }
-                StringTokenizer tok = new StringTokenizer(versionTemp, DOT);
 
-                if (tok.hasMoreTokens()) {
-                    majorVersionStr = tok.nextToken();
-                    majorVersion = NumberUtils.toLong(majorVersionStr);
-                    majorVersion = (majorVersion > VersionAnalyser.MAJOR_VERSION_MAX) ? VersionAnalyser.MAJOR_VERSION_MAX : majorVersion;
-                }
-                if (tok.hasMoreTokens()) {
-                    minorVersion = NumberUtils.toLong(tok.nextToken());
-                }
-                if (tok.hasMoreTokens()) {
-                    increVersion = NumberUtils.toLong(tok.nextToken());
-                }
-                if (tok.hasMoreTokens()) {
-                    four4Version = NumberUtils.toLong(tok.nextToken());
-                }
-            } else {
-                four4Version = NumberUtils.toLong(versionTemp);
+                // Clear the Cached Object
+                this.mysqlList.clear();
+            }
+        } else if (this.dbType == DatabaseType.MONGODB) {
+            // Nothing to be saved
+            if (this.mongoDocList.isEmpty()) {
+                return;
             }
 
-            long seq;
-            if (majorVersion == VersionAnalyser.MAJOR_VERSION_MAX) {
-                // We suspect the version string is usually a year.month.date
-                // So we set major version as the year
-                String upTo4char = majorVersionStr.substring(0, Math.min(majorVersionStr.length(), YEAR_LENGTH));
-                majorVersion = NumberUtils.toLong(upTo4char);
-                seq = shrinkLong(NumberUtils.toLong(majorVersionStr),
-                        MAJOR_VERSION_MAX_YEAR) * 1000000000L + shrinkLong(minorVersion, 999999) * 1000L + shrinkLong(increVersion, 999);
-            } else {
-                // All other cases
-                seq = majorVersion * 10000000000000000L
-                        + shrinkLong(minorVersion, 9999) * 1000000000000L
-                        + shrinkLong(increVersion, 999999) * 1000000L
-                        + shrinkLong(four4Version, 999999);
+            // Save batchSizeMongodb records as a group,
+            // Or when force save, save it no matter of the size
+            if (this.mongoDocList.size() >= this.batchSizeMongodb || force) {
+                LocalDateTime begin = LocalDateTime.now();
+                this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(this.mongoDocList);
+
+                Duration duration = Duration.between(begin, LocalDateTime.now());
+                LOG.log(Level.INFO, "MongoDB persist finished for records counter={0} in seconds={1}", new Object[]{counter, duration.toSeconds()});
+
+                // Clear the Cached Object
+                this.mongoDocList.clear();
             }
-
-            // Set results
-            this.majorVersionResult = (majorVersion >= Integer.MAX_VALUE) ? Integer.MAX_VALUE : (int) majorVersion;
-            this.versionSeqResult = seq;
-        }
-
-        /**
-         * Return {@link #majorVersionResult} value.
-         *
-         * @return Value of {@link #majorVersionResult}
-         */
-        int getMajorVersion() {
-            return this.majorVersionResult;
-        }
-
-        /**
-         * Return {@link #versionSeqResult} value.
-         *
-         * @return Value of {@link #versionSeqResult}
-         */
-        long getVersionSeq() {
-            return this.versionSeqResult;
-        }
-
-        /**
-         * {@inheritDoc}
-         */
-        @Override
-        public String toString() {
-            return this.majorVersionResult + ", " + this.versionSeqResult;
-        }
-
-        /**
-         * Shrink a long value to avoid it exceed the limit.
-         *
-         * @param value Value to shrink
-         * @param limit Max value allowed
-         * @return Value no more than the limit
-         */
-        private long shrinkLong(final long value, final long limit) {
-            long temp = value;
-            while (temp > limit) {
-                temp = temp / RADIX_DECIMAL;
-            }
-
-            return temp;
         }
     }
 
+    @Override
+    public void close() {
+        if (mysqlEmf != null) mysqlEmf.close();
+        if (mongoClient != null) mongoClient.close();
+    }
 }

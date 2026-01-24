@@ -3,10 +3,10 @@
 SELECT 
     json->>"$.groupId"  as group_id,
     count(*)            as counter
-  FROM mavendb.artifactinfo
-  WHERE classifier is null
-    and json->>"$.fileExtension" in (SELECT extension FROM binarydocjvmadm.extension)
-    and last_modified > DATE_SUB(NOW(),INTERVAL 1 YEAR) 
+  FROM mavendb.record
+  WHERE json->>"$.classifier" is null
+    and json->>"$.fileExtension" in ('jar', 'jmod')
+    and json->>"$.recordModified" > DATE_SUB(NOW(),INTERVAL 1 YEAR) 
   GROUP BY json->>"$.groupId"
   ORDER BY counter DESC
 ;
@@ -15,10 +15,10 @@ SELECT
     json->>"$.groupId"     as group_id,
     json->>"$.artifactId"  as artifact_id,
     count(*)               as counter
-  FROM mavendb.artifactinfo
-  WHERE classifier is null
-    and json->>"$.fileExtension" in (SELECT extension FROM binarydocjvmadm.extension)
-    and last_modified > DATE_SUB(NOW(),INTERVAL 1 YEAR) 
+  FROM mavendb.record
+  WHERE json->>"$.classifier" is null
+    and json->>"$.fileExtension" in ('jar', 'jmod')
+    and json->>"$.recordModified" > DATE_SUB(NOW(),INTERVAL 1 YEAR) 
   GROUP BY json->>"$.groupId", json->>"$.artifactId"
   ORDER BY counter DESC
 ;
@@ -54,11 +54,11 @@ ORDER BY counter desc, group_id_left1
 
 -- Get keys in the maven artifact
 SELECT json_keys(json)
-FROM `artifactinfo`
+FROM `record`
 LIMIT 100
 ;
 
--- All Keys defined in artifactinfo
+-- All Keys defined in record
 -- SEE : https://dev.mysql.com/doc/refman/8.0/en/json-table-functions.html#function_json-table
 -- WARN: This query will be very slow due to the data set size on maven central
 --
@@ -84,7 +84,7 @@ LIMIT 100
 "version"
 */
 
-SELECT distinct json_key FROM  artifactinfo,
+SELECT distinct json_key FROM  record,
   json_table(
     json_keys(json),
     '$[*]' COLUMNS(json_key JSON PATH '$')
@@ -94,7 +94,7 @@ ORDER BY json_key
 
 
 
-SELECT jt.* FROM artifactinfo,
+SELECT jt.* FROM record,
 json_table(
   json,
   '$[*]' COLUMNS(
@@ -110,18 +110,18 @@ limit 100
 --  "groupId": "org.apache.spark", "version": "1.2.0"
 --  "groupId": "org.apache.axis2", "version": "1.0.0", "packaging": "jar", "artifactId": "axis2-transport-http-tests",
 SELECT max(length(json->>"$.sha1"))
-FROM `artifactinfo`
+FROM `record`
 ;
 
 SELECT *, HEX(`uinfo_md5`) AS `uinfo_md5`
-FROM `artifactinfo`
+FROM `record`
 WHERE length(json->>"$.sha1") > 40
 ;
 
 
 -- Export json
 SELECT json
-FROM `artifactinfo`
-INTO outfile '/var/lib/mysql-files/artifactinfo.data'
+FROM `record`
+INTO outfile '/var/lib/mysql-files/record.data'
 ;
 

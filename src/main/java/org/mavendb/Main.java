@@ -4,7 +4,6 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 import java.util.logging.Level;
@@ -37,17 +36,17 @@ public class Main {
     /**
      * SQL script to create schema.
      */
-    static final String DB_CREATE_SQL = "create.sql";
+    static final String DB_MYSQL_CREATE_SQL = "create.sql";
 
     /**
      * SQL script to refresh data.
      */
-    static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
+    static final String DB_MYSQL_DATA_REFRESH_SQL = "data-refresh.sql";
 
     /**
      * Directory for DB scripts.
      */
-    static final String DIR_DB = "db";
+    static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
 
     /**
      * Directory for Configuration files.
@@ -62,7 +61,7 @@ public class Main {
     /**
      * Get the directory which contains the configuration or scripts.
      *
-     * @param dir Directory name, like {@link #DIR_DB}, {@link #DIR_ETC}, {@link #DIR_VAR}
+     * @param dir Directory name, like {@link #DIR_DB_MYSQL}, {@link #DIR_ETC}, {@link #DIR_VAR}
      * @param file Add File name to result, if it is not null / not empty
      */
     static String getDirectoryFileName(String dir, String file) {
@@ -126,7 +125,15 @@ public class Main {
         }
 
         String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
-        new MvnScanner(URI.create(reposFolder), dbType).perform(loadConfig());
+        MvnScanner scanner;
+        try {
+            scanner = MvnScanner.create(reposFolder, dbType);
+        } catch (IllegalArgumentException e) {
+            LOG.log(Level.SEVERE, "Invalid repository folder: " + reposFolder, e);
+            return;
+        }
+
+        scanner.perform(loadConfig());
 
         LOG.log(Level.INFO, "Finished");
 
@@ -173,7 +180,6 @@ public class Main {
         /**
          * Command line option: Maven Repos name to scan, like central, spring.
          */
-        @SuppressWarnings(value="UUF_UNUSED_FIELD")
         private static final Option OPTION_RESPOSNAME = Option.builder("f")
             .longOpt(OPTION_REPOS_FOLDER_LONGOPT)
             .hasArg()

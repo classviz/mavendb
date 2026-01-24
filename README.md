@@ -7,8 +7,10 @@ This application will scan all `maven` repos items and store them to database. S
 
 ## Prepare Database
 
+### Option: MySQL
+
 A Docker Compose file has been configured
-* [docker-compose.yml](docker-compose.yml)
+* [compose-mysql.yml](compose-mysql.yml)
 
 Step 1. Config
 - Modify the passwords set in the [.env](.env) file based on security requirements
@@ -17,18 +19,24 @@ Step 1. Config
 Step 2. Start
 - For `Ubuntu`/`Linux` users
   - [Install Docker](https://docs.docker.com/engine/install/ubuntu/)
-  - Execute script [docker-compose-run.sh](docker-compose-run.sh)
-    - `./docker-compose-run.sh`
+  - Execute script [compose-mysql.sh](compose-mysql.sh)
+    - `./compose-mysql.sh`
 - For MacOS Users
   - [Install Docker Desktop](https://docs.docker.com/desktop/install/mac-install/)
-  - Execute script [docker-compose-run.sh](docker-compose-run.sh)
-    - `./docker-compose-run.sh`
+  - Execute script [compose-mysql.sh](compose-mysql.sh)
+    - `./compose-mysql.sh`
 - For Windows Users
   - [Install Docker Desktop](https://docs.docker.com/desktop/install/windows-install/)
   - Make sure the [docker memory resource limit](https://stackoverflow.com/questions/43460770/docker-windows-container-memory-limit) is bigger than the MySQL `innodb_buffer_pool_size`
     - Example: on a 64GB RM Windows laptop, set `--innodb_buffer_pool_size=24G` will work for maven central scan
-  - Execute script [docker-compose-run.ps1](docker-compose-run.ps1)
-    - `powershell -ExecutionPolicy Bypass -File .\docker-compose-run.ps1`
+  - Execute script [compose-mysql.ps1](compose-mysql.ps1)
+    - `powershell -ExecutionPolicy Bypass -File .\compose-mysql.ps1`
+
+### Option: MongoDB
+
+Execute script [compose-mongodb.sh](compose-mongodb.sh)
+- `./compose-mongodb.sh`
+
 
 ## Download Indexes
 
@@ -64,28 +72,38 @@ How to Run the Tool
   * Modify the parameter `jakarta.persistence.jdbc.user` for the username
   * Modify the parameter `jakarta.persistence.jdbc.password` for the password
 * Come to the `bin` folder, run either of the following commands
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/`
+  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/` mysql
+  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/` mongodb
 
 ## Exeuction Time
 
 - Since maven central artifacts is keep improving, so the runtime will be longer and longer
 
-|  Time    | artifacts count  | Runtime/hour  | Notes |
-|----------|------------------|---------------|-------|
-| Sep 2023 |    `44,758,974`  |         `5.6` | innodb_buffer_pool_size=40G
-| Jul 2025 |    `76,619,430`  |        `19.1` | innodb_buffer_pool_size=100G
-| Aug 2025 |    `76,638,341`  |        `18.8` | innodb_buffer_pool_size=100G, `61,164,426` + `6,608,605`
+|  Time    | artifacts count  | Runtime     | DB Type | Notes |
+|----------|-----------------:|------------:|---------|-------|
+| Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
+| Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
+| Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
+| Jan 2026 |    `89,587,849`  |  `3.7` hour | MySQL   | `9,854,366` + `3,372,053`
+| Jan 2026 |    `89,587,849`  |   `40` min  | Mongodb | `2,422,703`
 
 
 ## Access
 
-### Adminer
+### Mongo Express
+
+Local Mongo Express: [http://localhost:8081/](http://localhost:8081/)
+- Username: `root`
+- Password: use the password in [.env](.env) file
+
+
+### MySQL Adminer
 
 Access via DB Adminer: [http://localhost:10191/](http://localhost:10191/)
 - Username: `mavendbadmin`, as defined in [.env](.env) file
 - Password: use the password in [.env](.env) file
 
-### REST API
+### MySQL REST API
 
 Access via REST API
 - Rest API user guide see [php-crud-api#treeql](https://github.com/mevdschee/php-crud-api#treeql-a-pragmatic-graphql)
@@ -93,7 +111,7 @@ Access via REST API
   - `group_id`: `org.apache.commons`
   - `artifact_id`: `commons-lang3`
 
-### Docker Shell
+### MySQL Docker Shell
 
 MySQL Docker Container
 - Come into Container
