@@ -38,6 +38,6 @@ java -showversion `
  -XX:+DebugNonSafepoints `
  -XX:FlightRecorderOptions=repository=../log `
  -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile `
- -Xmx16g `
+ -Xmx32g `
  -server `
  -jar ../mavendb.jar -f $reposFolder -d $dbType

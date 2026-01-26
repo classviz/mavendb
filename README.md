@@ -84,9 +84,11 @@ How to Run the Tool
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
-| Jan 2026 |    `89,587,849`  |  `3.7` hour | MySQL   | `9,854,366` + `3,372,053`
-| Jan 2026 |    `89,587,849`  |   `40` min  | Mongodb | `2,422,703`
+| Jan 2026 |    `89,587,849`  |  `4.0` hour | MySQL   | `7,697,394` + `6,759,079`
+| Jan 2026 |    `89,587,849`  |   `19` min  | Mongodb | `1,179,056`
 
+
+6,499,707
 
 ## Access
 

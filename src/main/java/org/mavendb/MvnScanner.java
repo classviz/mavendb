@@ -3,25 +3,26 @@ package org.mavendb;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.EntityManagerFactory;
-import jakarta.persistence.FlushModeType;
-import jakarta.persistence.Persistence;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
-import java.math.BigInteger;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.lang3.StringUtils;
@@ -43,9 +44,10 @@ import org.mavendb.Main.DatabaseType;
  */
 public class MvnScanner implements AutoCloseable {
 
+    private record MvnRecord(Long seqid, Integer majorVersion, Long versionSeq, Document json) {}
+
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
-    private static final String ENTITY_MANAGER_FACTORY = "PUMvn";
 
     private final URI indexFolder;
     private final DatabaseType dbType;
@@ -58,10 +60,20 @@ public class MvnScanner implements AutoCloseable {
 
     /* ------- MySQL ------- */
 
-    /**
-     * Database store factory.
-     */
-    private EntityManagerFactory mysqlEmf;
+    private String MYSQL_URL = "jdbc:mysql://localhost:3306/mavendb";
+
+    private static final Properties MYSQL_CONNECTION_PROPS = new Properties();
+
+    static {
+        MYSQL_CONNECTION_PROPS.setProperty("allowPublicKeyRetrieval", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("cachePrepStmts", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("rewriteBatchedStatements", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("useCompression", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("useLocalSessionState", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("useServerPrepStmts", "true");
+        MYSQL_CONNECTION_PROPS.setProperty("useSSL", "false");
+        MYSQL_CONNECTION_PROPS.setProperty("zeroDateTimeBehavior", "CONVERT_TO_NULL");
+    }
 
     /**
      * Objects to be saved to DB.
@@ -71,7 +83,8 @@ public class MvnScanner implements AutoCloseable {
     /**
      * Batch size for MySQL operations.
      */
-    private int batchSizeMysql;
+    private int mysqlBatchSize;
+    private int mysqlBatchWriteSize;
 
     /* ------- MongoDB ------- */
 
@@ -93,7 +106,13 @@ public class MvnScanner implements AutoCloseable {
     /**
      * Batch size for MongoDB operations.
      */
-    private int batchSizeMongodb;
+    private int mongodbBatchSize;
+
+    /**
+     * Virtual thread executor for asynchronous store operations.
+     * Uses Java virtual threads (Project Loom) with configurable concurrency limit.
+     */
+    private ThreadPoolExecutor storeExecutor;
 
     /**
      * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
@@ -168,21 +187,61 @@ public class MvnScanner implements AutoCloseable {
         }
     }
 
-    public void perform(Properties config) throws IOException {
+
+    public void perform(Properties config) throws IOException, SQLException {
+        // Load MySQL configurations
+        MYSQL_URL = config.getProperty("jakarta.persistence.jdbc.url", MYSQL_URL);
+        MYSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("jakarta.persistence.jdbc.user"));
+        MYSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("jakarta.persistence.jdbc.password"));
+
+
         // Load batch size configurations
-        this.batchSizeMysql = Integer.parseInt(config.getProperty("batch.size.mysql", "1000000"));
-        this.batchSizeMongodb = Integer.parseInt(config.getProperty("batch.size.mongodb", "2000000"));
+        this.mysqlBatchSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.size", "10000"));
+        this.mysqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.writing.size", "1000"));
+        this.mongodbBatchSize = Integer.parseInt(config.getProperty("mavendb.mongodb.batch.size", "20000"));
+
+        // Load max concurrent threads configuration, default to number of available processors
+        // Ensure at least 2 virtual thread
+        int maxConcurrentThreads = Math.max(2,
+            Integer.parseInt(
+                config.getProperty(
+                    "thread.pool.size",
+                    String.valueOf(Runtime.getRuntime().availableProcessors())
+            )));
+        LOG.log(Level.INFO, "Virtual thread pool size configured: {0}", maxConcurrentThreads);
+
+        // Create bounded virtual thread executor with configured concurrency limit
+        this.storeExecutor = new ThreadPoolExecutor(
+            0,                                          // Core threads
+            maxConcurrentThreads,                       // Max threads
+            60,                                         // Keep-alive time
+            TimeUnit.SECONDS,
+            new LinkedBlockingQueue<>(),                // Unbounded queue for tasks
+            Thread.ofVirtual().factory()
+        );
 
         if (this.dbType == DatabaseType.MYSQL) {
-            this.mysqlEmf = Persistence.createEntityManagerFactory(ENTITY_MANAGER_FACTORY, config);
             this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_MYSQL_CREATE_SQL));
         } else if (this.dbType == DatabaseType.MONGODB) {
-            this.mongoClient = MongoClients.create(config.getProperty("com.mongodb.client.uri"));
-            this.mongoDatabase = config.getProperty("com.mongodb.database.name", "mavendb");
+            this.mongoClient = MongoClients.create(config.getProperty("mavendb.mongodb.url"));
+            this.mongoDatabase = config.getProperty("mavendb.mongodb.database.name", "mavendb");
         }
 
         long start = System.currentTimeMillis();
         this.stepScan();
+
+        // Shutdown virtual thread executor and wait for pending tasks
+        this.storeExecutor.shutdown();
+        try {
+            if (!this.storeExecutor.awaitTermination(5, TimeUnit.MINUTES)) {
+                LOG.log(Level.WARNING, "Virtual thread executor did not terminate within timeout, forcing shutdown");
+                this.storeExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            LOG.log(Level.SEVERE, "Virtual thread executor shutdown was interrupted", e);
+            this.storeExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
         LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
         // Refresh Data
@@ -196,21 +255,15 @@ public class MvnScanner implements AutoCloseable {
      *
      * @see <a href="https://wiki.eclipse.org/EclipseLink/Examples/JPA/EMAPI#Getting_a_JDBC_Connection_from_an_EntityManager">Getting a JDBC Connection from an EntityManager</a>
      */
-    private void stepExecuteSQLScript(String script) throws IOException{
-        try (EntityManager em = mysqlEmf.createEntityManager();
+    private void stepExecuteSQLScript(String script) throws IOException, SQLException {
+        try (Connection conn = DriverManager.getConnection(MYSQL_URL, MYSQL_CONNECTION_PROPS);
              Reader r = new FileReader(script, StandardCharsets.UTF_8)
         ) {
-            em.getTransaction().begin();
-
-            LOG.log(Level.INFO, "SQL {0} execution started", script);
             long start = System.currentTimeMillis();
-            ScriptRunner sr = new ScriptRunner(em.unwrap(Connection.class));
-            sr.runScript(r);
+            LOG.log(Level.INFO, "SQL {0} execution started", script);
+            conn.setAutoCommit(false);
+            new ScriptRunner(conn).runScript(r);
             LOG.log(Level.INFO, "SQL {0} execution finished, execution time {1} ms", new Object[]{script, System.currentTimeMillis() - start});
-
-            em.getTransaction().commit();
-        } catch (Exception e) {
-            throw new RuntimeException("SQL script execution failed: " + script, e);
         }
     }
 
@@ -283,14 +336,11 @@ public class MvnScanner implements AutoCloseable {
 
     private void add(Document jsonDocument, VersionAnalyser analizedVersion, long recordSeq) {
         if (this.dbType == DatabaseType.MYSQL) {
-            // Prepare the Entity Object
-            MvnRecord dbAi = new MvnRecord(recordSeq);
-            dbAi.setMajorVersion(analizedVersion.getMajorVersion());
-            dbAi.setVersionSeq(BigInteger.valueOf(analizedVersion.getVersionSeq()));
-            dbAi.setJson(jsonDocument.toJson());
-
             // Add to DB To be saved List
-            this.mysqlList.add(dbAi);
+            this.mysqlList.add(new MvnRecord(recordSeq, 
+                analizedVersion.getMajorVersion(),
+                analizedVersion.getVersionSeq(),
+                jsonDocument));
         } else if (this.dbType == DatabaseType.MONGODB) {
             // Store jsonObject into MongoDB batch list
             jsonDocument.append("majorVersion", analizedVersion.getMajorVersion());
@@ -304,27 +354,37 @@ public class MvnScanner implements AutoCloseable {
      * Store to database.
      *
      * @param force Flag to force save or not
+     * @param counter Record counter
      */
-    private void store(final boolean force, final long counter) throws IOException {
+    private void store(final boolean force, final long counter) {
         if (this.dbType == DatabaseType.MYSQL) {
             // Nothing to be saved
             if (this.mysqlList.isEmpty()) {
                 return;
             }
 
-            // Save batchSizeMysql records as a group,
+            // Save mysqlBatchSize records as a group,
             // Or when force save, save it no matter of the size
-            if (this.mysqlList.size() >= this.batchSizeMysql || force) {
-                try (EntityManager em = this.mysqlEmf.createEntityManager()) {
-                    LocalDateTime begin = LocalDateTime.now();
-                    em.setFlushMode(FlushModeType.COMMIT);
-                    em.getTransaction().begin();
-                    this.mysqlList.forEach(em::persist);
-                    em.getTransaction().commit();
+            if (this.mysqlList.size() >= this.mysqlBatchSize || force) {
+                // Submit store operation to virtual thread for asynchronous execution.
+                List<MvnRecord> recordsToStore = List.copyOf(this.mysqlList);
 
-                    Duration duration = Duration.between(begin, LocalDateTime.now());
-                    LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}", new Object[]{counter, duration.toSeconds()});
+                // If the queue is too long, this call will block until space is available.
+                if (this.storeExecutor.getQueue().size() > 256) {
+                    LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
+                    while (this.storeExecutor.getQueue().size() > 128) {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
                 }
+
+                this.storeExecutor.submit(() -> {
+                    this.storeMySQL(recordsToStore, counter);
+                });
 
                 // Clear the Cached Object
                 this.mysqlList.clear();
@@ -335,14 +395,13 @@ public class MvnScanner implements AutoCloseable {
                 return;
             }
 
-            // Save batchSizeMongodb records as a group,
+            // Save mongodbBatchSize records as a group,
             // Or when force save, save it no matter of the size
-            if (this.mongoDocList.size() >= this.batchSizeMongodb || force) {
-                LocalDateTime begin = LocalDateTime.now();
-                this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(this.mongoDocList);
-
-                Duration duration = Duration.between(begin, LocalDateTime.now());
-                LOG.log(Level.INFO, "MongoDB persist finished for records counter={0} in seconds={1}", new Object[]{counter, duration.toSeconds()});
+            if (this.mongoDocList.size() >= this.mongodbBatchSize || force) {
+                List<Document> docsToStore = List.copyOf(this.mongoDocList);
+                this.storeExecutor.submit(() -> {
+                    this.storeMongoDB(docsToStore, counter);
+                });
 
                 // Clear the Cached Object
                 this.mongoDocList.clear();
@@ -350,9 +409,59 @@ public class MvnScanner implements AutoCloseable {
         }
     }
 
+    /**
+     * Store MySQL records asynchronously using virtual threads.
+     * Each virtual thread has its own EntityManager instance for thread-safe access.
+     * No synchronization needed - EntityManagerFactory and connection pool are thread-safe.
+     *
+     * @param mysqlList List of records to persist (independent copy, not shared)
+     * @param counter Record counter for logging
+     */
+    private void storeMySQL(List<MvnRecord> mysqlList, final long counter) {
+        try (Connection conn = DriverManager.getConnection(MYSQL_URL, MYSQL_CONNECTION_PROPS)) {
+            LocalDateTime begin = LocalDateTime.now();
+            conn.setAutoCommit(false);
+
+            String sql = "INSERT INTO record (seqid, major_version, version_seq, json) VALUES (?, ?, ?, ?)";
+
+            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+                int batchCount = 0;
+                for (MvnRecord record : mysqlList) {
+                    pstmt.setLong(1, record.seqid);
+                    pstmt.setInt(2, record.majorVersion);
+                    pstmt.setLong(3, record.versionSeq);
+                    pstmt.setString(4, record.json.toJson());
+                    pstmt.addBatch();
+
+                    // Execute batch every mysqlBatchWriteSize records to avoid large batches
+                    batchCount++;
+                    if (batchCount % this.mysqlBatchWriteSize == 0) {
+                        pstmt.executeBatch();
+                        conn.commit();
+                    }
+                }
+                // Execute remaining batch
+                pstmt.executeBatch();
+                conn.commit();
+            }
+            Duration duration = Duration.between(begin, LocalDateTime.now());
+            LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
+                new Object[]{counter, duration.toSeconds(), mysqlList.size()});
+        } catch ( SQLException e) {
+            LOG.log(Level.SEVERE, "Error during MySQL persist operation for records counter=" + counter, e);
+        }
+    }
+
+    private void storeMongoDB(List<Document> storeDocuments, final long counter) {
+        LocalDateTime begin = LocalDateTime.now();
+        this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(storeDocuments);
+        Duration duration = Duration.between(begin, LocalDateTime.now());
+        LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
+            new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
+    }
+
     @Override
     public void close() {
-        if (mysqlEmf != null) mysqlEmf.close();
         if (mongoClient != null) mongoClient.close();
     }
 }

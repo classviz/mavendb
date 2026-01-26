@@ -44,7 +44,7 @@ JAVA_OPTS=" \
  -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile \
 "
 
-RUN_CMD="java $JAVA_OPTS -Xmx16g -server -jar $BASEDIR/../mavendb.jar -f $1 -d $2"
+RUN_CMD="java $JAVA_OPTS -Xmx32g -server -jar $BASEDIR/../mavendb.jar -f $1 -d $2"
 echo "$(timestamp) $RUN_CMD"
 eval               $RUN_CMD
 
