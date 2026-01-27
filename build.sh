@@ -2,7 +2,7 @@
 #
 
 rm -rf dist/ target/
-mvn clean package test install
+mvn clean package test install -e
 
 # Generate javadoc
 #mvn javadoc:javadoc

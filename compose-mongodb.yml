@@ -3,7 +3,7 @@ networks:
     driver: bridge
 
 services:
-  mongo:
+  mongodb:
     # https://hub.docker.com/_/mongo
     image: mongo
     restart: always
@@ -11,7 +11,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: "${MONGO_ROOT_PASSWORD}"
     ports:
-      - 27017:27017
+      - ${MONGO_PORT}:27017
     networks:
       - mavendbmongonet
 
@@ -21,7 +21,7 @@ services:
     ports:
       - 8081:8081
     environment:
-      ME_CONFIG_MONGODB_URL: mongodb://root:${MONGO_ROOT_PASSWORD}@mongo:27017/
+      ME_CONFIG_MONGODB_URL: mongodb://root:${MONGO_ROOT_PASSWORD}@mongodb:27017/
       ME_CONFIG_BASICAUTH_ENABLED: true
       ME_CONFIG_BASICAUTH_USERNAME: root
       ME_CONFIG_BASICAUTH_PASSWORD: "${MONGO_ROOT_PASSWORD}"

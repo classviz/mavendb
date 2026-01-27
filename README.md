@@ -7,6 +7,12 @@ This application will scan all `maven` repos items and store them to database. S
 
 ## Prepare Database
 
+### Option: MongoDB
+
+Execute script [compose-mongodb.sh](compose-mongodb.sh)
+- `./compose-mongodb.sh`
+
+
 ### Option: MySQL
 
 A Docker Compose file has been configured
@@ -32,10 +38,10 @@ Step 2. Start
   - Execute script [compose-mysql.ps1](compose-mysql.ps1)
     - `powershell -ExecutionPolicy Bypass -File .\compose-mysql.ps1`
 
-### Option: MongoDB
+### Option: PSQL
 
-Execute script [compose-mongodb.sh](compose-mongodb.sh)
-- `./compose-mongodb.sh`
+Execute script [compose-postgresql.sh](compose-postgresql.sh)
+- `./compose-postgresql.sh`
 
 
 ## Download Indexes
@@ -85,10 +91,9 @@ How to Run the Tool
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
 | Jan 2026 |    `89,587,849`  |  `4.0` hour | MySQL   | `7,697,394` + `6,759,079`
-| Jan 2026 |    `89,587,849`  |   `19` min  | Mongodb | `1,179,056`
+| Jan 2026 |    `89,587,849`  |  `2.7` hour | PSQL    | `5,856,664` + `3,816,405`
+| Jan 2026 |    `89,587,849`  | `19.9` min  | Mongodb | `1,195,952`
 
-
-6,499,707
 
 ## Access
 
@@ -99,19 +104,25 @@ Local Mongo Express: [http://localhost:8081/](http://localhost:8081/)
 - Password: use the password in [.env](.env) file
 
 
-### MySQL Adminer
+### MySQL
 
 Access via DB Adminer: [http://localhost:10191/](http://localhost:10191/)
 - Username: `mavendbadmin`, as defined in [.env](.env) file
 - Password: use the password in [.env](.env) file
-
-### MySQL REST API
 
 Access via REST API
 - Rest API user guide see [php-crud-api#treeql](https://github.com/mevdschee/php-crud-api#treeql-a-pragmatic-graphql)
 - Sample: [http://localhost:2080/api.php/records/gav?filter=group_id,eq,org.apache.commons&filter=artifact_id,eq,commons-lang3&size=10](http://localhost:2080/api.php/records/gav?filter=group_id,eq,org.apache.commons&filter=artifact_id,eq,commons-lang3&size=10)
   - `group_id`: `org.apache.commons`
   - `artifact_id`: `commons-lang3`
+
+
+### PSQL
+
+Access via DB Adminer: [http://localhost:10192/](http://localhost:10192/)
+- Username: `root`
+- Password: use the password in [.env](.env) file
+
 
 ### MySQL Docker Shell
 

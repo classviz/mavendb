@@ -45,6 +45,13 @@
             </includes>
         </fileSet>
         <fileSet>
+            <directory>${project.build.directory}/db/psql</directory>
+            <outputDirectory>db/psql</outputDirectory>
+            <includes>
+                <include>*.sql</include>
+            </includes>
+        </fileSet>
+        <fileSet>
             <directory>${project.build.directory}/db/sqlite</directory>
             <outputDirectory>db/sqlite</outputDirectory>
             <includes>

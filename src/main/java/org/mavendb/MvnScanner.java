@@ -25,7 +25,6 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.ChunkReader;
 import org.apache.maven.index.reader.IndexReader;
@@ -36,6 +35,7 @@ import org.apache.maven.index.reader.resource.PathWritableResourceHandler;
 import org.apache.maven.index.reader.resource.UriResourceHandler;
 import org.bson.Document;
 import org.mavendb.Main.DatabaseType;
+import org.postgresql.util.PGobject;
 
 /**
  * Scan all artifacts in maven repository.
@@ -58,6 +58,12 @@ public class MvnScanner implements AutoCloseable {
      */
     private String indexId;
 
+    /**
+     * Virtual thread executor for asynchronous store operations.
+     * Uses Java virtual threads (Project Loom) with configurable concurrency limit.
+     */
+    private ThreadPoolExecutor storeExecutor;
+
     /* ------- MySQL ------- */
 
     private String MYSQL_URL = "jdbc:mysql://localhost:3306/mavendb";
@@ -78,7 +84,7 @@ public class MvnScanner implements AutoCloseable {
     /**
      * Objects to be saved to DB.
      */
-    private List<MvnRecord> mysqlList = new ArrayList<>();
+    private List<MvnRecord> mySqlpSqlList = new ArrayList<>();
 
     /**
      * Batch size for MySQL operations.
@@ -108,11 +114,20 @@ public class MvnScanner implements AutoCloseable {
      */
     private int mongodbBatchSize;
 
+    /* ------- PostgreSQL ------- */
+
+    private String PSQL_URL = "jdbc:postgresql://localhost:5432/mavendb";
+
+    private static final Properties POSTGRESQL_CONNECTION_PROPS = new Properties();
+    static {
+        POSTGRESQL_CONNECTION_PROPS.setProperty("ssl", "false");
+    }
+
     /**
-     * Virtual thread executor for asynchronous store operations.
-     * Uses Java virtual threads (Project Loom) with configurable concurrency limit.
+     * Batch size for PostgreSQL operations.
      */
-    private ThreadPoolExecutor storeExecutor;
+    private int psqlBatchSize;
+    private int psqlBatchWriteSize;
 
     /**
      * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
@@ -146,9 +161,6 @@ public class MvnScanner implements AutoCloseable {
      * @throws IllegalArgumentException if the path is invalid or contains suspicious patterns
      */
     private static URI validateAndCreateURI(String folderPath) throws IllegalArgumentException {
-        if (StringUtils.isBlank(folderPath)) {
-            throw new IllegalArgumentException("Index folder path cannot be null or empty");
-        }
 
         // Check for common path traversal patterns
         if (folderPath.contains("..") || folderPath.contains("~")) {
@@ -190,23 +202,28 @@ public class MvnScanner implements AutoCloseable {
 
     public void perform(Properties config) throws IOException, SQLException {
         // Load MySQL configurations
-        MYSQL_URL = config.getProperty("jakarta.persistence.jdbc.url", MYSQL_URL);
-        MYSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("jakarta.persistence.jdbc.user"));
-        MYSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("jakarta.persistence.jdbc.password"));
-
-
-        // Load batch size configurations
+        MYSQL_URL = config.getProperty("mavendb.mysql.url", MYSQL_URL);
+        MYSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.mysql.user"));
+        MYSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.mysql.password"));
         this.mysqlBatchSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.size", "10000"));
         this.mysqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.writing.size", "1000"));
+
+        // Load PostgreSQL configurations
+        PSQL_URL = config.getProperty("mavendb.psql.url", PSQL_URL);
+        POSTGRESQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.psql.user"));
+        POSTGRESQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.psql.password"));
+        this.psqlBatchSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.size", "10000"));
+        this.psqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.writing.size", "1000"));
+
+        // Load MongoDB configurations
         this.mongodbBatchSize = Integer.parseInt(config.getProperty("mavendb.mongodb.batch.size", "20000"));
 
         // Load max concurrent threads configuration, default to number of available processors
         // Ensure at least 2 virtual thread
         int maxConcurrentThreads = Math.max(2,
-            Integer.parseInt(
-                config.getProperty(
-                    "thread.pool.size",
-                    String.valueOf(Runtime.getRuntime().availableProcessors())
+            Integer.parseInt(config.getProperty(
+                "thread.pool.size",
+                String.valueOf(Runtime.getRuntime().availableProcessors())
             )));
         LOG.log(Level.INFO, "Virtual thread pool size configured: {0}", maxConcurrentThreads);
 
@@ -221,10 +238,12 @@ public class MvnScanner implements AutoCloseable {
         );
 
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_MYSQL_CREATE_SQL));
+            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_CREATE_SQL));
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.mongoClient = MongoClients.create(config.getProperty("mavendb.mongodb.url"));
             this.mongoDatabase = config.getProperty("mavendb.mongodb.database.name", "mavendb");
+        } else if (this.dbType == DatabaseType.PSQL) {
+            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_CREATE_SQL));
         }
 
         long start = System.currentTimeMillis();
@@ -246,7 +265,9 @@ public class MvnScanner implements AutoCloseable {
 
         // Refresh Data
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_MYSQL_DATA_REFRESH_SQL));
+            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_DATA_REFRESH_SQL));
+        } else if (this.dbType == DatabaseType.PSQL) {
+            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_DATA_REFRESH_SQL));
         }
     }
 
@@ -255,8 +276,20 @@ public class MvnScanner implements AutoCloseable {
      *
      * @see <a href="https://wiki.eclipse.org/EclipseLink/Examples/JPA/EMAPI#Getting_a_JDBC_Connection_from_an_EntityManager">Getting a JDBC Connection from an EntityManager</a>
      */
-    private void stepExecuteSQLScript(String script) throws IOException, SQLException {
-        try (Connection conn = DriverManager.getConnection(MYSQL_URL, MYSQL_CONNECTION_PROPS);
+    private void stepExecuteSQLScript(DatabaseType dbtype, String script) throws IOException, SQLException {
+        String url;
+        Properties props;
+        if (dbtype == DatabaseType.MYSQL) {
+            url = MYSQL_URL;
+            props = MYSQL_CONNECTION_PROPS;
+        } else if (dbtype == DatabaseType.PSQL) {
+            url = PSQL_URL;
+            props = POSTGRESQL_CONNECTION_PROPS;
+        } else {
+            throw new IllegalArgumentException("Unsupported database type for SQL script execution: " + dbtype);
+        }
+
+        try (Connection conn = DriverManager.getConnection(url, props);
              Reader r = new FileReader(script, StandardCharsets.UTF_8)
         ) {
             long start = System.currentTimeMillis();
@@ -289,7 +322,6 @@ public class MvnScanner implements AutoCloseable {
             LOG.log(Level.INFO,"indexRequiredChunkNames=" + indexReader.getChunkNames());
 
             for (ChunkReader chunkReader : indexReader) {
-
                 LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
                 LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
                 LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
@@ -320,7 +352,7 @@ public class MvnScanner implements AutoCloseable {
                     });
 
                     String versionString = record.getString(org.apache.maven.index.reader.Record.VERSION);
-                    if (StringUtils.isBlank(versionString)) {
+                    if (versionString == null || versionString.isBlank()) {
                         LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
                         continue;
                     }
@@ -335,9 +367,9 @@ public class MvnScanner implements AutoCloseable {
     }
 
     private void add(Document jsonDocument, VersionAnalyser analizedVersion, long recordSeq) {
-        if (this.dbType == DatabaseType.MYSQL) {
+        if (this.dbType == DatabaseType.MYSQL || this.dbType == DatabaseType.PSQL) {
             // Add to DB To be saved List
-            this.mysqlList.add(new MvnRecord(recordSeq, 
+            this.mySqlpSqlList.add(new MvnRecord(recordSeq,
                 analizedVersion.getMajorVersion(),
                 analizedVersion.getVersionSeq(),
                 jsonDocument));
@@ -357,17 +389,19 @@ public class MvnScanner implements AutoCloseable {
      * @param counter Record counter
      */
     private void store(final boolean force, final long counter) {
-        if (this.dbType == DatabaseType.MYSQL) {
+        if (this.dbType == DatabaseType.MYSQL || this.dbType == DatabaseType.PSQL) {
             // Nothing to be saved
-            if (this.mysqlList.isEmpty()) {
+            if (this.mySqlpSqlList.isEmpty()) {
                 return;
             }
 
+            int batchSize = this.dbType == DatabaseType.MYSQL ? this.mysqlBatchSize : this.psqlBatchSize;
+
             // Save mysqlBatchSize records as a group,
             // Or when force save, save it no matter of the size
-            if (this.mysqlList.size() >= this.mysqlBatchSize || force) {
+            if (this.mySqlpSqlList.size() >= batchSize || force) {
                 // Submit store operation to virtual thread for asynchronous execution.
-                List<MvnRecord> recordsToStore = List.copyOf(this.mysqlList);
+                List<MvnRecord> recordsToStore = List.copyOf(this.mySqlpSqlList);
 
                 // If the queue is too long, this call will block until space is available.
                 if (this.storeExecutor.getQueue().size() > 256) {
@@ -383,11 +417,11 @@ public class MvnScanner implements AutoCloseable {
                 }
 
                 this.storeExecutor.submit(() -> {
-                    this.storeMySQL(recordsToStore, counter);
+                    this.storeSQL(this.dbType, recordsToStore, counter);
                 });
 
                 // Clear the Cached Object
-                this.mysqlList.clear();
+                this.mySqlpSqlList.clear();
             }
         } else if (this.dbType == DatabaseType.MONGODB) {
             // Nothing to be saved
@@ -410,32 +444,44 @@ public class MvnScanner implements AutoCloseable {
     }
 
     /**
-     * Store MySQL records asynchronously using virtual threads.
+     * Store MySQL/PSQL records asynchronously using virtual threads.
      * Each virtual thread has its own EntityManager instance for thread-safe access.
      * No synchronization needed - EntityManagerFactory and connection pool are thread-safe.
      *
-     * @param mysqlList List of records to persist (independent copy, not shared)
+     * @param storeList List of records to persist (independent copy, not shared)
      * @param counter Record counter for logging
      */
-    private void storeMySQL(List<MvnRecord> mysqlList, final long counter) {
-        try (Connection conn = DriverManager.getConnection(MYSQL_URL, MYSQL_CONNECTION_PROPS)) {
+    private void storeSQL(DatabaseType dbtype, List<MvnRecord> storeList, final long counter) {
+        String url = dbtype == DatabaseType.MYSQL ? MYSQL_URL : PSQL_URL;
+        Properties props = dbtype == DatabaseType.MYSQL ? MYSQL_CONNECTION_PROPS : POSTGRESQL_CONNECTION_PROPS;
+        int batchWriteSize = dbtype == DatabaseType.MYSQL ? this.mysqlBatchWriteSize : this.psqlBatchWriteSize;
+
+        try (Connection conn = DriverManager.getConnection(url, props)) {
             LocalDateTime begin = LocalDateTime.now();
             conn.setAutoCommit(false);
 
-            String sql = "INSERT INTO record (seqid, major_version, version_seq, json) VALUES (?, ?, ?, ?)";
+            String sql = "INSERT INTO mavendb.record (seqid, major_version, version_seq, json) VALUES (?, ?, ?, ?)";
 
             try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
                 int batchCount = 0;
-                for (MvnRecord record : mysqlList) {
+                for (MvnRecord record : storeList) {
                     pstmt.setLong(1, record.seqid);
                     pstmt.setInt(2, record.majorVersion);
                     pstmt.setLong(3, record.versionSeq);
-                    pstmt.setString(4, record.json.toJson());
+
+                    if (dbtype == DatabaseType.MYSQL) {
+                        pstmt.setString(4, record.json.toJson());
+                    } else if (dbtype == DatabaseType.PSQL) {
+                        PGobject jsonObject = new PGobject();
+                        jsonObject.setType("jsonb");
+                        jsonObject.setValue(record.json.toJson());
+                        pstmt.setObject(4, jsonObject);
+                    }
                     pstmt.addBatch();
 
-                    // Execute batch every mysqlBatchWriteSize records to avoid large batches
+                    // Execute write batch every records to avoid large batches
                     batchCount++;
-                    if (batchCount % this.mysqlBatchWriteSize == 0) {
+                    if (batchCount % batchWriteSize == 0) {
                         pstmt.executeBatch();
                         conn.commit();
                     }
@@ -446,7 +492,7 @@ public class MvnScanner implements AutoCloseable {
             }
             Duration duration = Duration.between(begin, LocalDateTime.now());
             LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
-                new Object[]{counter, duration.toSeconds(), mysqlList.size()});
+                new Object[]{counter, duration.toSeconds(), storeList.size()});
         } catch ( SQLException e) {
             LOG.log(Level.SEVERE, "Error during MySQL persist operation for records counter=" + counter, e);
         }

@@ -15,7 +15,6 @@ import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
-import org.codehaus.plexus.util.StringUtils;
 
 /**
  * Entrance of the application.
@@ -37,17 +36,22 @@ public class Main {
     /**
      * SQL script to create schema.
      */
-    static final String DB_MYSQL_CREATE_SQL = "create.sql";
+    static final String DB_CREATE_SQL = "create.sql";
 
     /**
      * SQL script to refresh data.
      */
-    static final String DB_MYSQL_DATA_REFRESH_SQL = "data-refresh.sql";
+    static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
 
     /**
-     * Directory for DB scripts.
+     * Directory for MySQL DB scripts.
      */
     static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
+
+    /**
+     * Directory for PostgreSQL DB scripts.
+     */
+    static final String DIR_DB_PSQL = "db" + File.separator + "psql";
 
     /**
      * Directory for Configuration files.
@@ -65,10 +69,10 @@ public class Main {
      * @param dir Directory name, like {@link #DIR_DB_MYSQL}, {@link #DIR_ETC}, {@link #DIR_VAR}
      * @param file Add File name to result, if it is not null / not empty
      */
-    static String getDirectoryFileName(String dir, String file) {
+    protected static String getDirectoryFileName(String dir, String file) {
         File baseDir = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().getPath());
         String result = baseDir.getParent() + File.separator + dir;
-        if (StringUtils.isNotBlank(file)) {
+        if (!file.isBlank()) {
             result = result + File.separator + file;
         }
         return result;
@@ -175,7 +179,7 @@ public class Main {
         private static final Option OPTION_DB_TYPE = Option.builder("d")
             .longOpt(OPTION_DB_TYPE_LONGOPT)
             .hasArg()
-            .desc("Database type, like mysql, mongodb.")
+            .desc("Database type, like mysql, mongodb, psql.")
             .required()
             .get();
         /**
@@ -208,6 +212,7 @@ public class Main {
 
     static enum DatabaseType {
         MYSQL,
-        MONGODB
+        MONGODB,
+        PSQL
     }
 }
