@@ -40,8 +40,8 @@ Step 2. Start
 
 ### Option: PSQL
 
-Execute script [compose-postgresql.sh](compose-postgresql.sh)
-- `./compose-postgresql.sh`
+Execute script [compose-psql.sh](compose-psql.sh)
+- `./compose-psql.sh`
 
 
 ## Download Indexes
@@ -91,7 +91,7 @@ How to Run the Tool
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
 | Jan 2026 |    `89,587,849`  |  `4.0` hour | MySQL   | `7,697,394` + `6,759,079`
-| Jan 2026 |    `89,587,849`  |  `2.7` hour | PSQL    | `5,856,664` + `3,816,405`
+| Jan 2026 |    `89,587,849`  |  `2.4` hour | PSQL    | `5,733,796` + `3,187,521`
 | Jan 2026 |    `89,587,849`  | `19.9` min  | Mongodb | `1,195,952`
 
 

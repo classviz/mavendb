@@ -49,7 +49,7 @@ public class Main {
     static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
 
     /**
-     * Directory for PostgreSQL DB scripts.
+     * Directory for PSQL DB scripts.
      */
     static final String DIR_DB_PSQL = "db" + File.separator + "psql";
 

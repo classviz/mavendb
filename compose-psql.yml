@@ -1,5 +1,5 @@
 networks:
-  postgresnet:
+  psqlnet:
     driver: bridge
 
 services:
@@ -7,13 +7,14 @@ services:
   postgresdb:
     image: postgres:18
     container_name: postgresdb
+    hostname: postgresdb
     restart: always
     environment:
       POSTGRES_USER: mavendbadmin
-      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD}"
+      POSTGRES_PASSWORD: "${PSQL_PASSWORD}"
       POSTGRES_DB: mavendb
     ports:
-      - ${POSTGRES_PORT}:5432
+      - ${PSQL_PORT}:5432
     command: >
       postgres 
       -c shared_buffers=32GB
@@ -27,15 +28,16 @@ services:
       -c random_page_cost=1.1
     shm_size: 16gb
     networks:
-      - postgresnet
+      - psqlnet
 
   postgres-adminer:
     image: adminer
+    hostname: postgres-adminer
     restart: always
     environment:
       ADMINER_DEFAULT_SERVER: 'postgresdb'
     ports:
-      - ${POSTGRES_ADMINER_PORT}:8080
+      - ${PSQL_ADMINER_PORT}:8080
     networks:
-      - postgresnet
+      - psqlnet
 

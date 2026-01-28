@@ -31,7 +31,7 @@ CREATE TABLE gav (
     artifact_id         varchar(254) NOT NULL,
     artifact_version    varchar(128) NOT NULL,
 
-    -- PostgreSQL generated column (stored)
+    -- PSQL generated column (stored)
     file_name varchar(512) GENERATED ALWAYS AS (
         left(
             CASE

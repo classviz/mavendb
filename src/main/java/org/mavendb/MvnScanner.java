@@ -114,17 +114,17 @@ public class MvnScanner implements AutoCloseable {
      */
     private int mongodbBatchSize;
 
-    /* ------- PostgreSQL ------- */
+    /* ------- PSQL ------- */
 
     private String PSQL_URL = "jdbc:postgresql://localhost:5432/mavendb";
 
-    private static final Properties POSTGRESQL_CONNECTION_PROPS = new Properties();
+    private static final Properties PSQL_CONNECTION_PROPS = new Properties();
     static {
-        POSTGRESQL_CONNECTION_PROPS.setProperty("ssl", "false");
+        PSQL_CONNECTION_PROPS.setProperty("ssl", "false");
     }
 
     /**
-     * Batch size for PostgreSQL operations.
+     * Batch size for PSQL operations.
      */
     private int psqlBatchSize;
     private int psqlBatchWriteSize;
@@ -208,10 +208,10 @@ public class MvnScanner implements AutoCloseable {
         this.mysqlBatchSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.size", "10000"));
         this.mysqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.writing.size", "1000"));
 
-        // Load PostgreSQL configurations
+        // Load PSQL configurations
         PSQL_URL = config.getProperty("mavendb.psql.url", PSQL_URL);
-        POSTGRESQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.psql.user"));
-        POSTGRESQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.psql.password"));
+        PSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.psql.user"));
+        PSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.psql.password"));
         this.psqlBatchSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.size", "10000"));
         this.psqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.writing.size", "1000"));
 
@@ -284,7 +284,7 @@ public class MvnScanner implements AutoCloseable {
             props = MYSQL_CONNECTION_PROPS;
         } else if (dbtype == DatabaseType.PSQL) {
             url = PSQL_URL;
-            props = POSTGRESQL_CONNECTION_PROPS;
+            props = PSQL_CONNECTION_PROPS;
         } else {
             throw new IllegalArgumentException("Unsupported database type for SQL script execution: " + dbtype);
         }
@@ -453,7 +453,7 @@ public class MvnScanner implements AutoCloseable {
      */
     private void storeSQL(DatabaseType dbtype, List<MvnRecord> storeList, final long counter) {
         String url = dbtype == DatabaseType.MYSQL ? MYSQL_URL : PSQL_URL;
-        Properties props = dbtype == DatabaseType.MYSQL ? MYSQL_CONNECTION_PROPS : POSTGRESQL_CONNECTION_PROPS;
+        Properties props = dbtype == DatabaseType.MYSQL ? MYSQL_CONNECTION_PROPS : PSQL_CONNECTION_PROPS;
         int batchWriteSize = dbtype == DatabaseType.MYSQL ? this.mysqlBatchWriteSize : this.psqlBatchWriteSize;
 
         try (Connection conn = DriverManager.getConnection(url, props)) {
