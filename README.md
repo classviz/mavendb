@@ -78,8 +78,8 @@ How to Run the Tool
   * Modify the parameter `jakarta.persistence.jdbc.user` for the username
   * Modify the parameter `jakarta.persistence.jdbc.password` for the password
 * Come to the `bin` folder, run either of the following commands
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/` mysql
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/` mongodb
+  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql`
+  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb`
 
 ## Exeuction Time
 
@@ -90,9 +90,9 @@ How to Run the Tool
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
-| Jan 2026 |    `89,587,849`  |  `4.0` hour | MySQL   | `7,697,394` + `6,759,079`
+| Jan 2026 |    `89,587,849`  |  `2.9` hour | MySQL   | `6,517,301` + `4,087,565`
 | Jan 2026 |    `89,587,849`  |  `2.4` hour | PSQL    | `5,733,796` + `3,187,521`
-| Jan 2026 |    `89,587,849`  | `19.9` min  | Mongodb | `1,195,952`
+| Jan 2026 |    `89,587,849`  | `26.2` min  | Mongodb | `1,144,533` + `427,491`
 
 
 ## Access

@@ -11,73 +11,6 @@ select concat(now(), ' Started');
 -- Refresh the counter tables after updated the latest tgav
 --
 
--- Refresh data for table gav
---  Note. We did not do string cut here, so the SQL will fail if the data is too long
---        We need to watch out the errors in case happens
-TRUNCATE TABLE gav;
-INSERT INTO    gav(
-  seqid,
-
-  group_id,
-  artifact_id,
-  artifact_version,
-
-  major_version,
-  version_seq,
-
-  last_modified,
-  `size`,
-  sha1,
-
-  signature_exists,
-  sources_exists,
-  javadoc_exists,
-
-  classifier,
-  file_extension,
-  packaging,
-  `name`,
-  description
-)
-SELECT
-  seqid,
-
-  json->>"$.groupId"                              AS group_id,
-  json->>"$.artifactId"                           AS artifact_id,
-  json->>"$.version"                              AS artifact_version,
-
-  major_version,
-  version_seq,
-
-  FROM_UNIXTIME(json->>"$.recordModified" / 1000) AS last_modified,
-  json->>"$.fileSize"                             AS `size`,
-  left(json->>"$.sha1", 40)                       AS sha1,
-
-  CASE
-        WHEN json->>"$.hasSignature" = 'true' THEN TRUE
-        WHEN json->>"$.hasSignature" = 'false' THEN FALSE
-        ELSE NULL -- Handle cases that are not 'true' or 'false'
-    END                                           AS signature_exists,
-  CASE
-        WHEN json->>"$.hasSources" = 'true' THEN TRUE
-        WHEN json->>"$.hasSources" = 'false' THEN FALSE
-        ELSE NULL -- Handle cases that are not 'true' or 'false'
-    END                                           AS sources_exists,
-  CASE
-        WHEN json->>"$.hasJavadoc" = 'true' THEN TRUE
-        WHEN json->>"$.hasJavadoc" = 'false' THEN FALSE
-        ELSE NULL -- Handle cases that are not 'true' or 'false'
-    END                                           AS javadoc_exists,
-
-  json->>"$.classifier"                           AS classifier,
-  json->>"$.fileExtension"                        AS file_extension,
-  json->>"$.packaging"                            AS packaging,
-  json->>"$.name"                                 AS `name`,
-  json->>"$.description"                          AS description
-FROM record
-;
-select concat(now(), ' Table gav refresh data finished');
-
 
 -- Fix data for: `group_id` = 'org.apache.tomcat' AND `artifact_id` = 'tomcat'
 --   Problem        : after 2020-12-03/9.0.41 the ArtifactInfo only contains record for 'zip.sha512' but no data for the "zip" file
@@ -93,6 +26,11 @@ WHERE group_id       = 'org.apache.tomcat'
 select concat(now(), ' Table gav Fix org.apache.tomcat/tomcat/zip.sha512 finished');
 
 
+ALTER TABLE gav
+ADD INDEX index_gav (group_id, artifact_id, artifact_version),
+ADD INDEX index_fname (file_name);
+
+
 -- Refresh data for table g
 TRUNCATE TABLE g;
 INSERT INTO    g (
@@ -100,13 +38,13 @@ INSERT INTO    g (
   artifact_version_counter,
   major_version_counter,
   version_seq_max,
-  last_modified_max           )
+  file_modified_max           )
 SELECT
   distinct group_id,
   count(DISTINCT artifact_version) AS artifact_version_counter,
   count(DISTINCT major_version)    AS major_version_counter,
   max(version_seq)                 AS version_seq_max,
-  max(last_modified)               AS last_modified_max
+  max(file_modified)               AS file_modified_max
 FROM gav
 GROUP BY group_id
 ORDER BY group_id
@@ -120,13 +58,13 @@ INSERT INTO    ga (
   artifact_version_counter,
   major_version_counter,
   version_seq_max,
-  last_modified_max            )
+  file_modified_max            )
 SELECT 
   distinct group_id, artifact_id,
   count(DISTINCT artifact_version) AS artifact_version_counter,
   count(DISTINCT major_version)    AS major_version_counter,
   max(version_seq)                 AS version_seq_max,
-  max(last_modified)               AS last_modified_max
+  max(file_modified)               AS file_modified_max
 FROM gav
 GROUP BY group_id, artifact_id
 ORDER BY group_id, artifact_id

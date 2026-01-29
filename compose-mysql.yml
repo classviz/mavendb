@@ -8,11 +8,14 @@ services:
   mysqldb:
     image: mysql:8
     # Buffer Pool Settings based on OS RAM Size
-    #   OS RAM :  innodb_buffer_pool_size , innodb_buffer_pool_instances
-    #    16 GB                        10G , 2
-    #    32 GB                        20G , 2
-    #    64 GB                        40G , 4
-    #   128 GB                       100G , 10
+    #   OS RAM :  innodb_buffer_pool_size
+    #    16 GB                        10G
+    #    32 GB                        20G
+    #    64 GB                        40G
+    #   128 GB                       100G
+    #
+    # innodb_flush_log_at_trx_commit:
+    #   For batch operations where absolute ACID compliance for every single intermediate write is not critical, setting this to 0 or 2 can improve write performance, though at the risk of losing a few seconds of data in a crash.
     command:
       --bulk_insert_buffer_size=128M
       --character-set-server=utf8mb4
@@ -20,19 +23,15 @@ services:
       --default-time-zone='+00:00'
       --disable-log-bin
       --group_concat_max_len=52428800
-      --innodb_buffer_pool_instances=10
       --innodb_buffer_pool_size=100G
       --innodb_doublewrite=0
       --innodb_file_per_table=1
       --innodb_flush_log_at_timeout=4
-      --innodb_flush_log_at_trx_commit=0
+      --innodb_flush_log_at_trx_commit=2
       --innodb_log_buffer_size=256M
       --innodb_log_file_size=1G
       --innodb_log_files_in_group=4
-      --innodb_read_io_threads=64
       --innodb_sort_buffer_size=512M
-      --innodb_write_io_threads=32
-      --key_buffer_size=1G
       --local_infile=1
       --log_queries_not_using_indexes=1
       --long_query_time=2

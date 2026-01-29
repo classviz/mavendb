@@ -5,18 +5,6 @@
 CREATE SCHEMA IF NOT EXISTS mavendb;
 SET search_path TO mavendb;
 
--- ============================================================
--- TABLE: record
--- ============================================================
-
-DROP TABLE IF EXISTS record;
-
-CREATE TABLE record (
-    seqid           bigint      PRIMARY KEY,
-    major_version   int,
-    version_seq     bigint      NOT NULL DEFAULT 0,
-    json            jsonb
-);
 
 -- ============================================================
 -- TABLE: gav
@@ -27,9 +15,26 @@ DROP TABLE IF EXISTS gav CASCADE;
 CREATE TABLE gav (
     seqid               bigint      NOT NULL,
 
+    major_version       int,
+    version_seq         bigint NOT NULL,
+
+    record_modified     bigint,
+    file_modified       bigint,
+    file_size           bigint,
+
+    has_signature       boolean,
+    has_sources         boolean,
+    has_javadoc         boolean,
+
+    sha1                char(40),
+
     group_id            varchar(254) NOT NULL,
     artifact_id         varchar(254) NOT NULL,
     artifact_version    varchar(128) NOT NULL,
+
+    classifier          varchar(128),
+    packaging           varchar(254),
+    file_extension      varchar(254),
 
     -- PSQL generated column (stored)
     file_name varchar(512) GENERATED ALWAYS AS (
@@ -44,32 +49,12 @@ CREATE TABLE gav (
         )
     ) STORED,
 
-    major_version       int,
-    version_seq         bigint NOT NULL,
-
-    last_modified       timestamp,
-    size                bigint,
-    sha1                char(40),
-
-    signature_exists    boolean,
-    sources_exists      boolean,
-    javadoc_exists      boolean,
-
-    classifier          varchar(128),
-    file_extension      varchar(254),
-    packaging           varchar(254),
     name                varchar(1024),
     description         text,
 
-    -- Indexes
-    CONSTRAINT gav_pk PRIMARY KEY (seqid)
+    json                jsonb
 );
 
-CREATE INDEX index_gav
-    ON gav (group_id, artifact_id, artifact_version);
-
-CREATE INDEX index_fname
-    ON gav (file_name);
 
 -- ============================================================
 -- TABLE: g
@@ -78,7 +63,7 @@ CREATE INDEX index_fname
 DROP TABLE IF EXISTS g;
 
 CREATE TABLE g (
-    group_id                varchar(254) PRIMARY KEY,
+    group_id                    varchar(254) PRIMARY KEY,
 
     artifact_version_counter    int,
     major_version_counter       int,
@@ -90,11 +75,6 @@ CREATE TABLE g (
     group_id_left3 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 3)) STORED,
     group_id_left4 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 4)) STORED
 );
-
-CREATE INDEX index_group_id_left1 ON g (group_id_left1);
-CREATE INDEX index_group_id_left2 ON g (group_id_left2);
-CREATE INDEX index_group_id_left3 ON g (group_id_left3);
-CREATE INDEX index_group_id_left4 ON g (group_id_left4);
 
 -- ============================================================
 -- TABLE: ga
@@ -128,7 +108,7 @@ SELECT
     file_name,
     major_version,
     version_seq,
-    last_modified AS mvn_last_modified,
+    file_modified AS mvn_file_modified,
 
     concat(
         'mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
@@ -140,7 +120,7 @@ SELECT
         END
     ) AS mvn_command,
 
-    size,
+    file_size,
     classifier,
     file_extension,
     packaging,

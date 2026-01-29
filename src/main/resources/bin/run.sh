@@ -25,7 +25,6 @@ echo ""
 
 JAVA_OPTS=" \
  -showversion \
- -verbose:gc \
  -verbose:module \
  -Xdiag \
  -Xlog:codecache,gc*,safepoint:file=../log/jvmunified.log:level,tags,time,uptime,pid:filesize=209715200,filecount=10 \

@@ -2,6 +2,8 @@ package org.mavendb;
 
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.InsertManyOptions;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -229,7 +231,7 @@ public class MvnScanner implements AutoCloseable {
 
         // Create bounded virtual thread executor with configured concurrency limit
         this.storeExecutor = new ThreadPoolExecutor(
-            0,                                          // Core threads
+            2,                                          // Core threads
             maxConcurrentThreads,                       // Max threads
             60,                                         // Keep-alive time
             TimeUnit.SECONDS,
@@ -238,12 +240,12 @@ public class MvnScanner implements AutoCloseable {
         );
 
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_CREATE_SQL));
+            this.stepExecuteSQLScript(MYSQL_URL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_CREATE_SQL));
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.mongoClient = MongoClients.create(config.getProperty("mavendb.mongodb.url"));
             this.mongoDatabase = config.getProperty("mavendb.mongodb.database.name", "mavendb");
         } else if (this.dbType == DatabaseType.PSQL) {
-            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_CREATE_SQL));
+            this.stepExecuteSQLScript(PSQL_URL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_CREATE_SQL));
         }
 
         long start = System.currentTimeMillis();
@@ -265,9 +267,11 @@ public class MvnScanner implements AutoCloseable {
 
         // Refresh Data
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_DATA_REFRESH_SQL));
+            this.stepExecuteSQLScript(MYSQL_URL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_DATA_REFRESH_SQL));
         } else if (this.dbType == DatabaseType.PSQL) {
-            this.stepExecuteSQLScript(this.dbType, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_DATA_REFRESH_SQL));
+            this.stepExecuteSQLScript(PSQL_URL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_DATA_REFRESH_SQL));
+        } else if (this.dbType == DatabaseType.MONGODB) {
+            this.createIndexesMongoDB();
         }
     }
 
@@ -276,19 +280,7 @@ public class MvnScanner implements AutoCloseable {
      *
      * @see <a href="https://wiki.eclipse.org/EclipseLink/Examples/JPA/EMAPI#Getting_a_JDBC_Connection_from_an_EntityManager">Getting a JDBC Connection from an EntityManager</a>
      */
-    private void stepExecuteSQLScript(DatabaseType dbtype, String script) throws IOException, SQLException {
-        String url;
-        Properties props;
-        if (dbtype == DatabaseType.MYSQL) {
-            url = MYSQL_URL;
-            props = MYSQL_CONNECTION_PROPS;
-        } else if (dbtype == DatabaseType.PSQL) {
-            url = PSQL_URL;
-            props = PSQL_CONNECTION_PROPS;
-        } else {
-            throw new IllegalArgumentException("Unsupported database type for SQL script execution: " + dbtype);
-        }
-
+    private void stepExecuteSQLScript(String url, Properties props, String script) throws IOException, SQLException {
         try (Connection conn = DriverManager.getConnection(url, props);
              Reader r = new FileReader(script, StandardCharsets.UTF_8)
         ) {
@@ -382,6 +374,21 @@ public class MvnScanner implements AutoCloseable {
         }
     }
 
+    private void avoidOverload(int maxQueueSize, int resumeQueueSize) {
+        // If the store executor queue is too long, wait for it to reduce
+        if (this.storeExecutor.getQueue().size() > maxQueueSize) {
+        LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
+        while (this.storeExecutor.getQueue().size() > resumeQueueSize) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
+        }
+    }
+
     /**
      * Store to database.
      *
@@ -400,22 +407,14 @@ public class MvnScanner implements AutoCloseable {
             // Save mysqlBatchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.mySqlpSqlList.size() >= batchSize || force) {
+                // The maxQueueSize will decide the memory usage
+                // Example:
+                //   256 ~= 15 GB memory usage
+                //   128 ~= 7.8 GB memory usage
+                this.avoidOverload(128, 32);
+
                 // Submit store operation to virtual thread for asynchronous execution.
                 List<MvnRecord> recordsToStore = List.copyOf(this.mySqlpSqlList);
-
-                // If the queue is too long, this call will block until space is available.
-                if (this.storeExecutor.getQueue().size() > 256) {
-                    LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
-                    while (this.storeExecutor.getQueue().size() > 128) {
-                        try {
-                            Thread.sleep(100);
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                    }
-                    LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
-                }
-
                 this.storeExecutor.submit(() -> {
                     this.storeSQL(this.dbType, recordsToStore, counter);
                 });
@@ -432,6 +431,8 @@ public class MvnScanner implements AutoCloseable {
             // Save mongodbBatchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.mongoDocList.size() >= this.mongodbBatchSize || force) {
+                this.avoidOverload(40, 10);
+
                 List<Document> docsToStore = List.copyOf(this.mongoDocList);
                 this.storeExecutor.submit(() -> {
                     this.storeMongoDB(docsToStore, counter);
@@ -460,23 +461,85 @@ public class MvnScanner implements AutoCloseable {
             LocalDateTime begin = LocalDateTime.now();
             conn.setAutoCommit(false);
 
-            String sql = "INSERT INTO mavendb.record (seqid, major_version, version_seq, json) VALUES (?, ?, ?, ?)";
+            String sqlGav = """
+                INSERT INTO mavendb.gav (
+                    seqid,
+                    major_version, version_seq,
+                    record_modified, file_modified, file_size, 
+                    has_signature, has_sources, has_javadoc,
+                    sha1,
+                    group_id, artifact_id, artifact_version,
+                    classifier, packaging, file_extension,
+                    name, description,
+                    json
+                ) VALUES (
+                    ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?
+                )
+            """;
 
-            try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+            try (PreparedStatement pstmt = conn.prepareStatement(sqlGav)) {
                 int batchCount = 0;
                 for (MvnRecord record : storeList) {
+                    // Note. We did not do string cut here, so the SQL will fail if the data is too long
+                    //       We need to watch out the errors in case happens
+
                     pstmt.setLong(1, record.seqid);
+
                     pstmt.setInt(2, record.majorVersion);
                     pstmt.setLong(3, record.versionSeq);
 
-                    if (dbtype == DatabaseType.MYSQL) {
-                        pstmt.setString(4, record.json.toJson());
-                    } else if (dbtype == DatabaseType.PSQL) {
-                        PGobject jsonObject = new PGobject();
-                        jsonObject.setType("jsonb");
-                        jsonObject.setValue(record.json.toJson());
-                        pstmt.setObject(4, jsonObject);
+                    pstmt.setObject(4, record.json.getLong("recordModified"));   record.json.remove("recordModified");
+                    pstmt.setObject(5, record.json.getLong("fileModified"));     record.json.remove("fileModified");
+                    pstmt.setObject(6, record.json.getLong("fileSize"));         record.json.remove("fileSize");
+
+                    pstmt.setBoolean(7, record.json.getBoolean("hasSignature")); record.json.remove("hasSignature");
+                    pstmt.setBoolean(8, record.json.getBoolean("hasSources"));   record.json.remove ("hasSources");
+                    pstmt.setBoolean(9, record.json.getBoolean("hasJavadoc"));   record.json.remove ("hasJavadoc");
+
+                    pstmt.setString(10, record.json.getString("sha1"));          record.json.remove("sha1");
+
+                    pstmt.setString(11, record.json.getString("groupId"));       record.json.remove("groupId");
+                    pstmt.setString(12, record.json.getString("artifactId"));    record.json.remove("artifactId");
+                    pstmt.setString(13, record.json.getString("version"));       record.json.remove("version");
+
+                    pstmt.setString(14, record.json.getString("classifier"));    record.json.remove("classifier");
+                    pstmt.setString(15, record.json.getString("packaging"));     record.json.remove("packaging");
+                    pstmt.setString(16, record.json.getString("fileExtension")); record.json.remove("fileExtension");
+
+                    pstmt.setString(17, record.json.getString("name"));          record.json.remove("name");
+                    pstmt.setString(18, record.json.getString("description"));   record.json.remove("description");
+
+                    // Remove _id from json if it's the only field left
+                    if (record.json.size() == 1) {
+                        record.json.remove("_id");
                     }
+
+                    if (dbtype == DatabaseType.MYSQL) {
+                        if (record.json.size() == 0) {
+                            pstmt.setString(19, null);
+                        } else {
+                            pstmt.setString(19, record.json.toJson());
+                        }
+
+                    } else if (dbtype == DatabaseType.PSQL) {
+                        if (record.json.size() == 0) {
+                            pstmt.setObject(19, null, java.sql.Types.OTHER);
+                        } else {
+                            PGobject jsonObject = new PGobject();
+                            jsonObject.setType("jsonb");
+                            jsonObject.setValue(record.json.toJson());
+                            pstmt.setObject(19, jsonObject);
+                        }
+                    }
+
                     pstmt.addBatch();
 
                     // Execute write batch every records to avoid large batches
@@ -500,10 +563,26 @@ public class MvnScanner implements AutoCloseable {
 
     private void storeMongoDB(List<Document> storeDocuments, final long counter) {
         LocalDateTime begin = LocalDateTime.now();
-        this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(storeDocuments);
+        this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(
+            storeDocuments,
+            new InsertManyOptions().ordered(false)
+        );
         Duration duration = Duration.between(begin, LocalDateTime.now());
         LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
             new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
+    }
+
+    private void createIndexesMongoDB() {
+        long start = System.currentTimeMillis();
+
+        this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).createIndex(Indexes.compoundIndex(
+            Indexes.ascending("groupId"),
+            Indexes.ascending("artifactId"),
+            Indexes.ascending("version"),
+            Indexes.ascending("versionSeq"),
+            Indexes.ascending("majorVersion")
+        ));
+        LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});
     }
 
     @Override

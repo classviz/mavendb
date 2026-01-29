@@ -6,71 +6,13 @@ SET search_path TO mavendb;
 
 SELECT now() || ' Started' AS status;
 
--- ============================================================
--- Refresh table: gav
--- ============================================================
+CREATE INDEX index_gav
+    ON gav (group_id, artifact_id, artifact_version);
 
-TRUNCATE TABLE gav;
+CREATE INDEX index_fname
+    ON gav (file_name);
 
-INSERT INTO gav (
-    seqid,
-    group_id,
-    artifact_id,
-    artifact_version,
-    major_version,
-    version_seq,
-    last_modified,
-    size,
-    sha1,
-    signature_exists,
-    sources_exists,
-    javadoc_exists,
-    classifier,
-    file_extension,
-    packaging,
-    name,
-    description
-)
-SELECT
-    seqid,
-
-    json ->> 'groupId'       AS group_id,
-    json ->> 'artifactId'    AS artifact_id,
-    json ->> 'version'       AS artifact_version,
-
-    major_version,
-    version_seq,
-
-    to_timestamp( (json ->> 'recordModified')::bigint / 1000 ) AS last_modified,
-    (json ->> 'fileSize')::bigint                              AS size,
-    substr(json ->> 'sha1', 1, 40)                             AS sha1,
-
-    CASE json ->> 'hasSignature'
-        WHEN 'true'  THEN TRUE
-        WHEN 'false' THEN FALSE
-        ELSE NULL
-    END AS signature_exists,
-
-    CASE json ->> 'hasSources'
-        WHEN 'true'  THEN TRUE
-        WHEN 'false' THEN FALSE
-        ELSE NULL
-    END AS sources_exists,
-
-    CASE json ->> 'hasJavadoc'
-        WHEN 'true'  THEN TRUE
-        WHEN 'false' THEN FALSE
-        ELSE NULL
-    END AS javadoc_exists,
-
-    json ->> 'classifier'     AS classifier,
-    json ->> 'fileExtension'  AS file_extension,
-    json ->> 'packaging'      AS packaging,
-    json ->> 'name'           AS name,
-    json ->> 'description'    AS description
-FROM record;
-
-SELECT now() || ' Table gav refresh data finished' AS status;
+SELECT now() || ' Table gav create index finished' AS status;
 
 -- ============================================================
 -- Fix Tomcat zip.sha512 → zip
@@ -106,6 +48,11 @@ SELECT
 FROM gav
 GROUP BY group_id
 ORDER BY group_id;
+
+CREATE INDEX index_group_id_left1 ON g (group_id_left1);
+CREATE INDEX index_group_id_left2 ON g (group_id_left2);
+CREATE INDEX index_group_id_left3 ON g (group_id_left3);
+CREATE INDEX index_group_id_left4 ON g (group_id_left4);
 
 SELECT now() || ' Table g refresh data finished' AS status;
 
