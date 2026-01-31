@@ -23,6 +23,7 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.ChunkReader;
 import org.apache.maven.index.reader.IndexReader;
@@ -136,7 +137,7 @@ public class MvnScanner implements AutoCloseable {
     /**
      * Objects to be saved to DB.
      */
-    private List<MvnRecord> mySqlpSqlList = new ArrayList<>();
+    private List<MvnRecord> sqlDataList = new ArrayList<>();
 
     /**
      * Batch size for MySQL operations.
@@ -448,7 +449,7 @@ public class MvnScanner implements AutoCloseable {
     private void add(Document jsonDocument, VersionAnalyser analizedVersion, long recordSeq) {
         if (this.dbType == DatabaseType.MYSQL || this.dbType == DatabaseType.PSQL) {
             // Add to DB To be saved List
-            this.mySqlpSqlList.add(new MvnRecord(recordSeq,
+            this.sqlDataList.add(new MvnRecord(recordSeq,
                 analizedVersion.getMajorVersion(),
                 analizedVersion.getVersionSeq(),
                 jsonDocument));
@@ -485,7 +486,7 @@ public class MvnScanner implements AutoCloseable {
     private void store(final boolean force, final long counter) {
         if (this.dbType == DatabaseType.MYSQL || this.dbType == DatabaseType.PSQL) {
             // Nothing to be saved
-            if (this.mySqlpSqlList.isEmpty()) {
+            if (this.sqlDataList.isEmpty()) {
                 return;
             }
 
@@ -493,7 +494,7 @@ public class MvnScanner implements AutoCloseable {
 
             // Save mysqlBatchSize records as a group,
             // Or when force save, save it no matter of the size
-            if (this.mySqlpSqlList.size() >= batchSize || force) {
+            if (this.sqlDataList.size() >= batchSize || force) {
                 // The maxQueueSize will decide the memory usage
                 // Example:
                 //   256 ~= 15 GB memory usage
@@ -501,13 +502,13 @@ public class MvnScanner implements AutoCloseable {
                 this.avoidOverload(SQL_QUEUE_MAX_SIZE, SQL_QUEUE_RESUME_SIZE);
 
                 // Submit store operation to virtual thread for asynchronous execution.
-                List<MvnRecord> recordsToStore = List.copyOf(this.mySqlpSqlList);
+                List<MvnRecord> recordsToStore = List.copyOf(this.sqlDataList);
                 this.storeExecutor.submit(() -> {
                     this.databaseRepository.storeSQL(recordsToStore, counter);
                 });
 
                 // Clear the Cached Object
-                this.mySqlpSqlList.clear();
+                this.sqlDataList.clear();
             }
         } else if (this.dbType == DatabaseType.MONGODB) {
             // Nothing to be saved
