@@ -92,6 +92,16 @@ public class MvnScanner implements AutoCloseable {
                 json = new Document(json);
             }
         }
+
+        /**
+         * Returns a defensive copy of the json Document to prevent external mutation.
+         *
+         * @return a copy of the json Document, or null if json is null
+         */
+        @Override
+        public Document json() {
+            return json == null ? null : new Document(json);
+        }
     }
 
     /** Logger. */

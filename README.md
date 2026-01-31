@@ -80,6 +80,7 @@ How to Run the Tool
 * Come to the `bin` folder, run either of the following commands
   * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql`
   * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb`
+  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql`
 
 ## Exeuction Time
 

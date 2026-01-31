@@ -31,8 +31,8 @@ public class ConfigurationManager {
     /* ------- Configuration Defaults ------- */
     protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/mavendb";
     protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/mavendb";
-    private static final int DEFAULT_MYSQL_BATCH_SIZE = 10000;
-    private static final int DEFAULT_PSQL_BATCH_SIZE = 10000;
+    private static final int DEFAULT_MYSQL_BATCH_SIZE = 20000;
+    private static final int DEFAULT_PSQL_BATCH_SIZE = 20000;
     private static final int DEFAULT_MONGODB_BATCH_SIZE = 20000;
     private static final int MIN_BATCH_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 100000;
