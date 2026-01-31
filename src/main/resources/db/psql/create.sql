@@ -13,7 +13,7 @@ SET search_path TO mavendb;
 DROP TABLE IF EXISTS gav CASCADE;
 
 CREATE TABLE gav (
-    seqid               bigint      NOT NULL,
+    seqid               bigint NOT NULL,
 
     major_version       int,
     version_seq         bigint NOT NULL,
@@ -68,7 +68,7 @@ CREATE TABLE g (
     artifact_version_counter    int,
     major_version_counter       int,
     version_seq_max             bigint,
-    last_modified_max           timestamp,
+    file_modified_max           bigint,
 
     group_id_left1 varchar(128) GENERATED ALWAYS AS (split_part(group_id, '.', 1)) STORED,
     group_id_left2 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 2)) STORED,
@@ -89,7 +89,7 @@ CREATE TABLE ga (
     artifact_version_counter    int,
     major_version_counter       int,
     version_seq_max             bigint,
-    last_modified_max           timestamp,
+    file_modified_max           bigint,
 
     PRIMARY KEY (group_id, artifact_id)
 );
@@ -108,7 +108,7 @@ SELECT
     file_name,
     major_version,
     version_seq,
-    file_modified AS mvn_file_modified,
+    file_modified,
 
     concat(
         'mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
@@ -120,8 +120,8 @@ SELECT
         END
     ) AS mvn_command,
 
-    file_size,
     classifier,
+    file_size,
     file_extension,
     packaging,
     name,

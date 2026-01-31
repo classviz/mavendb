@@ -88,7 +88,7 @@ SELECT
   file_name,
   major_version,
   version_seq,
-  file_modified                                        AS mvn_file_modified,
+  file_modified,
   concat('mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
     if(isnull(classifier),
         concat(group_id, ':', artifact_id, ':', artifact_version,':', file_extension),

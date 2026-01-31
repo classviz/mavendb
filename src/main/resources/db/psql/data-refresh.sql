@@ -37,14 +37,14 @@ INSERT INTO g (
     artifact_version_counter,
     major_version_counter,
     version_seq_max,
-    last_modified_max
+    file_modified_max
 )
 SELECT
     group_id,
     count(DISTINCT artifact_version) AS artifact_version_counter,
     count(DISTINCT major_version)    AS major_version_counter,
     max(version_seq)                 AS version_seq_max,
-    max(last_modified)               AS last_modified_max
+    max(file_modified)               AS file_modified_max
 FROM gav
 GROUP BY group_id
 ORDER BY group_id;
@@ -68,7 +68,7 @@ INSERT INTO ga (
     artifact_version_counter,
     major_version_counter,
     version_seq_max,
-    last_modified_max
+    file_modified_max
 )
 SELECT
     group_id,
@@ -76,7 +76,7 @@ SELECT
     count(DISTINCT artifact_version) AS artifact_version_counter,
     count(DISTINCT major_version)    AS major_version_counter,
     max(version_seq)                 AS version_seq_max,
-    max(last_modified)               AS last_modified_max
+    max(file_modified)               AS file_modified_max
 FROM gav
 GROUP BY group_id, artifact_id
 ORDER BY group_id, artifact_id;

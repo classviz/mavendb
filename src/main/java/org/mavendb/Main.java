@@ -34,55 +34,26 @@ public class Main {
     private static final String CONFIG_FILE = "config.properties";
 
     /**
-     * SQL script to create schema.
-     */
-    static final String DB_CREATE_SQL = "create.sql";
-
-    /**
-     * SQL script to refresh data.
-     */
-    static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
-
-    /**
-     * Directory for MySQL DB scripts.
-     */
-    static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
-
-    /**
-     * Directory for PSQL DB scripts.
-     */
-    static final String DIR_DB_PSQL = "db" + File.separator + "psql";
-
-    /**
      * Directory for Configuration files.
      */
     private static final String DIR_ETC = "etc";
 
     /**
-     * Directory for Big cache files.
-     */
-    static final String DIR_VAR = "var";
-
-    /**
      * Get the directory which contains the configuration or scripts.
      *
-     * @param dir Directory name, like {@link #DIR_DB_MYSQL}, {@link #DIR_ETC}, {@link #DIR_VAR}
-     * @param file Add File name to result, if it is not null / not empty
+     * @param dir Directory name, like {@link #DIR_ETC}, {@link MvnScanner#DIR_DB_MYSQL}, {@link MvnScanner#DIR_DB_PSQL}
+     * @param file File name, like {@link #CONFIG_FILE}, {@link MvnScanner#DB_CREATE_SQL}
+     * @return The full path of the file
      */
     protected static String getDirectoryFileName(String dir, String file) {
         File baseDir = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().getPath());
-        String result = baseDir.getParent() + File.separator + dir;
-        if (!file.isBlank()) {
-            result = result + File.separator + file;
-        }
-        return result;
+        return baseDir.getParent() + File.separator + dir + File.separator + file;
     }
 
     /**
-     * Load the {@link #CONFIG_FILE} or Docker <code>ENV</code>.
+     * Load the {@link #CONFIG_FILE}.
      */
     private static Properties loadConfig() throws IOException {
-
         // Get the config file name
         String configFileName = Main.getDirectoryFileName(DIR_ETC, CONFIG_FILE);
 
@@ -100,6 +71,7 @@ public class Main {
      *
      * @param args the command line arguments
      * @throws IOException Exception
+     * @throws SQLException Exception
      */
     public static void main(String[] args) throws IOException, SQLException {
 
@@ -114,22 +86,40 @@ public class Main {
             line = new DefaultParser().parse(CommandOptions.OPTIONS, args);
         } catch (ParseException exp) {
             // oops, something went wrong
-            LOG.log(Level.SEVERE, "Comand line paramter parsing failed.", exp);
+            LOG.log(Level.SEVERE, "Command line parameter parsing failed.", exp);
             Main.printHelp();
             return;
         }
 
-        String dbString = line.getOptionValue(CommandOptions.OPTION_DB_TYPE_LONGOPT).toUpperCase();
+        if (line.hasOption(CommandOptions.OPTION_HELP.getLongOpt())) {
+            Main.printHelp();
+            return;
+        }
+
+        String dbTypeStringValue = line.getOptionValue(CommandOptions.OPTION_DB_TYPE_LONGOPT);
+        if (dbTypeStringValue.isBlank()) {
+            LOG.log(Level.SEVERE, "Database type is required");
+            Main.printHelp();
+            return;
+        }
+
+        String dbTypeString = dbTypeStringValue.toUpperCase();
         DatabaseType dbType;
         try {
-            dbType = Enum.valueOf(DatabaseType.class, dbString);
+            dbType = Enum.valueOf(DatabaseType.class, dbTypeString);
         } catch (IllegalArgumentException e) {
-            LOG.log(Level.SEVERE, "Unsupported database type: " + dbString, e);
+            LOG.log(Level.SEVERE, "Unsupported database type: " + dbTypeString);
             Main.printHelp();
             return;
         }
 
         String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
+        if (reposFolder.isBlank()) {
+            LOG.log(Level.SEVERE, "Repository folder is required");
+            Main.printHelp();
+            return;
+        }
+
         MvnScanner scanner;
         try {
             scanner = MvnScanner.create(reposFolder, dbType);
@@ -185,7 +175,7 @@ public class Main {
         /**
          * Command line option: Maven Repos name to scan, like central, spring.
          */
-        private static final Option OPTION_RESPOSNAME = Option.builder("f")
+        private static final Option OPTION_REPOS_FOLDER = Option.builder("f")
             .longOpt(OPTION_REPOS_FOLDER_LONGOPT)
             .hasArg()
             .desc("Maven Repos folder to scan, like central, spring; the folder will match to the config file at etc/repos-<the name>.properties.")
@@ -205,7 +195,7 @@ public class Main {
 
         static {
             OPTIONS.addOption(OPTION_DB_TYPE);
-            OPTIONS.addOption(OPTION_RESPOSNAME);
+            OPTIONS.addOption(OPTION_REPOS_FOLDER);
             OPTIONS.addOption(OPTION_HELP);
         }
     }

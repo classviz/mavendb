@@ -3,8 +3,7 @@ package org.mavendb;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.model.InsertManyOptions;
-
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -14,10 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
-import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +33,6 @@ import org.apache.maven.index.reader.resource.PathWritableResourceHandler;
 import org.apache.maven.index.reader.resource.UriResourceHandler;
 import org.bson.Document;
 import org.mavendb.Main.DatabaseType;
-import org.postgresql.util.PGobject;
 
 /**
  * Scan all artifacts in maven repository.
@@ -46,7 +41,57 @@ import org.postgresql.util.PGobject;
  */
 public class MvnScanner implements AutoCloseable {
 
-    private record MvnRecord(Long seqid, Integer majorVersion, Long versionSeq, Document json) {}
+    /**
+     * SQL script to create schema.
+     */
+    private static final String DB_CREATE_SQL = "create.sql";
+
+    /**
+     * SQL script to refresh data.
+     */
+    private static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
+
+    /**
+     * Directory for MySQL DB scripts.
+     */
+    private static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
+
+    /**
+     * Directory for PSQL DB scripts.
+     */
+    private static final String DIR_DB_PSQL = "db" + File.separator + "psql";
+
+    /* ------- Executor Configuration ------- */
+    private static final int EXECUTOR_CORE_THREADS = 2;
+    private static final int EXECUTOR_KEEP_ALIVE_SECONDS = 60;
+    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_30_SECONDS = 30;
+    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_60_SECONDS = 60;
+    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_300_SECONDS = 300;
+    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_600_SECONDS = 600;
+    private static final int EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS = 5;
+
+    /* ------- Queue Management ------- */
+    private static final int SQL_QUEUE_MAX_SIZE = 64;
+    private static final int SQL_QUEUE_RESUME_SIZE = 32;
+    private static final int MONGODB_QUEUE_MAX_SIZE = 40;
+    private static final int MONGODB_QUEUE_RESUME_SIZE = 10;
+
+    /**
+     * Record representing a Maven artifact from the index.
+     * Uses a compact constructor to create a defensive copy of the mutable Document object.
+     */
+    public record MvnRecord(Long seqid, Integer majorVersion, Long versionSeq, Document json) {
+        /**
+         * Compact constructor that creates a defensive copy of the mutable Document.
+         * This prevents external code from modifying the Document after the record is created.
+         */
+        public MvnRecord {
+            if (json != null) {
+                // Create a defensive copy of the Document to prevent external mutation
+                json = new Document(json);
+            }
+        }
+    }
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
@@ -66,9 +111,12 @@ public class MvnScanner implements AutoCloseable {
      */
     private ThreadPoolExecutor storeExecutor;
 
-    /* ------- MySQL ------- */
+    /**
+     * Database repository for storing records and documents.
+     */
+    private DatabaseRepository databaseRepository;
 
-    private String MYSQL_URL = "jdbc:mysql://localhost:3306/mavendb";
+    /* ------- MySQL ------- */
 
     private static final Properties MYSQL_CONNECTION_PROPS = new Properties();
 
@@ -83,6 +131,8 @@ public class MvnScanner implements AutoCloseable {
         MYSQL_CONNECTION_PROPS.setProperty("zeroDateTimeBehavior", "CONVERT_TO_NULL");
     }
 
+    private String mysqlURL = ConfigurationManager.DEFAULT_MYSQL_URL;
+
     /**
      * Objects to be saved to DB.
      */
@@ -92,7 +142,6 @@ public class MvnScanner implements AutoCloseable {
      * Batch size for MySQL operations.
      */
     private int mysqlBatchSize;
-    private int mysqlBatchWriteSize;
 
     /* ------- MongoDB ------- */
 
@@ -118,7 +167,7 @@ public class MvnScanner implements AutoCloseable {
 
     /* ------- PSQL ------- */
 
-    private String PSQL_URL = "jdbc:postgresql://localhost:5432/mavendb";
+    private String psqlURL = ConfigurationManager.DEFAULT_PSQL_URL;
 
     private static final Properties PSQL_CONNECTION_PROPS = new Properties();
     static {
@@ -129,7 +178,6 @@ public class MvnScanner implements AutoCloseable {
      * Batch size for PSQL operations.
      */
     private int psqlBatchSize;
-    private int psqlBatchWriteSize;
 
     /**
      * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
@@ -163,7 +211,6 @@ public class MvnScanner implements AutoCloseable {
      * @throws IllegalArgumentException if the path is invalid or contains suspicious patterns
      */
     private static URI validateAndCreateURI(String folderPath) throws IllegalArgumentException {
-
         // Check for common path traversal patterns
         if (folderPath.contains("..") || folderPath.contains("~")) {
             throw new IllegalArgumentException("Index folder path contains suspicious patterns: " + folderPath);
@@ -203,75 +250,115 @@ public class MvnScanner implements AutoCloseable {
 
 
     public void perform(Properties config) throws IOException, SQLException {
+        ConfigurationManager configMgr = new ConfigurationManager(config);
+
         // Load MySQL configurations
-        MYSQL_URL = config.getProperty("mavendb.mysql.url", MYSQL_URL);
-        MYSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.mysql.user"));
-        MYSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.mysql.password"));
-        this.mysqlBatchSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.size", "10000"));
-        this.mysqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.mysql.batch.writing.size", "1000"));
+        this.mysqlURL = configMgr.getMysqlUrl();
+        String mysqlUser = configMgr.getDatabaseUser(ConfigurationManager.getConfigMysqlUser(), DatabaseType.MYSQL);
+        String mysqlPassword = configMgr.getDatabasePassword(ConfigurationManager.getConfigMysqlPassword(), DatabaseType.MYSQL);
+        MYSQL_CONNECTION_PROPS.setProperty("user", mysqlUser);
+        MYSQL_CONNECTION_PROPS.setProperty("password", mysqlPassword);
+        this.mysqlBatchSize = configMgr.getMysqlBatchSize();
 
         // Load PSQL configurations
-        PSQL_URL = config.getProperty("mavendb.psql.url", PSQL_URL);
-        PSQL_CONNECTION_PROPS.setProperty("user", config.getProperty("mavendb.psql.user"));
-        PSQL_CONNECTION_PROPS.setProperty("password", config.getProperty("mavendb.psql.password"));
-        this.psqlBatchSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.size", "10000"));
-        this.psqlBatchWriteSize = Integer.parseInt(config.getProperty("mavendb.psql.batch.writing.size", "1000"));
+        this.psqlURL = configMgr.getPsqlUrl();
+        String psqlUser = configMgr.getDatabaseUser(ConfigurationManager.getConfigPsqlUser(), DatabaseType.PSQL);
+        String psqlPassword = configMgr.getDatabasePassword(ConfigurationManager.getConfigPsqlPassword(), DatabaseType.PSQL);
+        PSQL_CONNECTION_PROPS.setProperty("user", psqlUser);
+        PSQL_CONNECTION_PROPS.setProperty("password", psqlPassword);
+        this.psqlBatchSize = configMgr.getPsqlBatchSize();
 
         // Load MongoDB configurations
-        this.mongodbBatchSize = Integer.parseInt(config.getProperty("mavendb.mongodb.batch.size", "20000"));
+        this.mongodbBatchSize = configMgr.getMongodbBatchSize();
 
-        // Load max concurrent threads configuration, default to number of available processors
-        // Ensure at least 2 virtual thread
-        int maxConcurrentThreads = Math.max(2,
-            Integer.parseInt(config.getProperty(
-                "thread.pool.size",
-                String.valueOf(Runtime.getRuntime().availableProcessors())
-            )));
+        // Load max concurrent threads configuration
+        int maxConcurrentThreads = configMgr.parseThreadPoolSize();
         LOG.log(Level.INFO, "Virtual thread pool size configured: {0}", maxConcurrentThreads);
 
         // Create bounded virtual thread executor with configured concurrency limit
         this.storeExecutor = new ThreadPoolExecutor(
-            2,                                          // Core threads
-            maxConcurrentThreads,                       // Max threads
-            60,                                         // Keep-alive time
+            EXECUTOR_CORE_THREADS,
+            maxConcurrentThreads,
+            EXECUTOR_KEEP_ALIVE_SECONDS,
             TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(),                // Unbounded queue for tasks
+            new LinkedBlockingQueue<>(),
             Thread.ofVirtual().factory()
         );
 
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(MYSQL_URL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_CREATE_SQL));
+            this.stepExecuteSQLScript(this.mysqlURL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(DIR_DB_MYSQL, DB_CREATE_SQL));
+            this.databaseRepository = new DatabaseRepository(DatabaseType.MYSQL, this.mysqlURL, MYSQL_CONNECTION_PROPS);
         } else if (this.dbType == DatabaseType.MONGODB) {
-            this.mongoClient = MongoClients.create(config.getProperty("mavendb.mongodb.url"));
-            this.mongoDatabase = config.getProperty("mavendb.mongodb.database.name", "mavendb");
+            String mongoUrl = configMgr.getMongodbUrl();
+            this.mongoClient = MongoClients.create(mongoUrl);
+            this.mongoDatabase = configMgr.getMongodbDatabase();
+            this.databaseRepository = new DatabaseRepository(this.mongoClient, this.mongoDatabase, this.indexId);
         } else if (this.dbType == DatabaseType.PSQL) {
-            this.stepExecuteSQLScript(PSQL_URL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_CREATE_SQL));
+            this.stepExecuteSQLScript(this.psqlURL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(DIR_DB_PSQL, DB_CREATE_SQL));
+            this.databaseRepository = new DatabaseRepository(DatabaseType.PSQL, this.psqlURL, PSQL_CONNECTION_PROPS);
         }
 
         long start = System.currentTimeMillis();
         this.stepScan();
 
-        // Shutdown virtual thread executor and wait for pending tasks
-        this.storeExecutor.shutdown();
-        try {
-            if (!this.storeExecutor.awaitTermination(5, TimeUnit.MINUTES)) {
-                LOG.log(Level.WARNING, "Virtual thread executor did not terminate within timeout, forcing shutdown");
-                this.storeExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            LOG.log(Level.SEVERE, "Virtual thread executor shutdown was interrupted", e);
-            this.storeExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        // Shutdown virtual thread executor and wait for pending tasks with exponential backoff
+        shutdownExecutorGracefully();
         LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
         // Refresh Data
         if (this.dbType == DatabaseType.MYSQL) {
-            this.stepExecuteSQLScript(MYSQL_URL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_MYSQL, Main.DB_DATA_REFRESH_SQL));
+            this.stepExecuteSQLScript(this.mysqlURL, MYSQL_CONNECTION_PROPS, Main.getDirectoryFileName(DIR_DB_MYSQL, DB_DATA_REFRESH_SQL));
         } else if (this.dbType == DatabaseType.PSQL) {
-            this.stepExecuteSQLScript(PSQL_URL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(Main.DIR_DB_PSQL, Main.DB_DATA_REFRESH_SQL));
+            this.stepExecuteSQLScript(this.psqlURL, PSQL_CONNECTION_PROPS, Main.getDirectoryFileName(DIR_DB_PSQL, DB_DATA_REFRESH_SQL));
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.createIndexesMongoDB();
+        }
+    }
+
+    /**
+     * Shutdown the executor gracefully with progressive timeouts.
+     * First attempts immediate termination with a short timeout (30 seconds).
+     * If that fails, progressively increases timeout up to 10 minutes before forcing shutdown.
+     */
+    private void shutdownExecutorGracefully() {
+        this.storeExecutor.shutdown();
+        LOG.log(Level.INFO, "Virtual thread executor shutdown requested, waiting for pending tasks...");
+
+        long[] timeouts = {
+            EXECUTOR_SHUTDOWN_TIMEOUT_30_SECONDS,
+            EXECUTOR_SHUTDOWN_TIMEOUT_60_SECONDS,
+            EXECUTOR_SHUTDOWN_TIMEOUT_300_SECONDS,
+            EXECUTOR_SHUTDOWN_TIMEOUT_600_SECONDS
+        };
+        TimeUnit unit = TimeUnit.SECONDS;
+
+        for (int i = 0; i < timeouts.length; i++) {
+            try {
+                if (this.storeExecutor.awaitTermination(timeouts[i], unit)) {
+                    LOG.log(Level.INFO, "Virtual thread executor terminated gracefully after {0} seconds", timeouts[i]);
+                    return;
+                }
+
+                int queueSize = this.storeExecutor.getQueue().size();
+                LOG.log(Level.INFO, "Waiting for executor termination (attempt {0}/{1}): {2} tasks remaining",
+                    new Object[]{i + 1, timeouts.length, queueSize});
+            } catch (InterruptedException e) {
+                LOG.log(Level.WARNING, "Virtual thread executor shutdown was interrupted", e);
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+
+        // Force shutdown if graceful shutdown failed
+        LOG.log(Level.WARNING, "Virtual thread executor did not terminate within timeout, forcing shutdown");
+        this.storeExecutor.shutdownNow();
+        try {
+            if (!this.storeExecutor.awaitTermination(EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                LOG.log(Level.SEVERE, "Virtual thread executor did not respond to shutdownNow within {0} seconds", EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS);
+            }
+        } catch (InterruptedException e) {
+            LOG.log(Level.SEVERE, "Interrupted while waiting for executor to respond to shutdownNow", e);
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -377,15 +464,15 @@ public class MvnScanner implements AutoCloseable {
     private void avoidOverload(int maxQueueSize, int resumeQueueSize) {
         // If the store executor queue is too long, wait for it to reduce
         if (this.storeExecutor.getQueue().size() > maxQueueSize) {
-        LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
-        while (this.storeExecutor.getQueue().size() > resumeQueueSize) {
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+            LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
+            while (this.storeExecutor.getQueue().size() > resumeQueueSize) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-        }
-        LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
+            LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
         }
     }
 
@@ -411,12 +498,12 @@ public class MvnScanner implements AutoCloseable {
                 // Example:
                 //   256 ~= 15 GB memory usage
                 //   128 ~= 7.8 GB memory usage
-                this.avoidOverload(128, 32);
+                this.avoidOverload(SQL_QUEUE_MAX_SIZE, SQL_QUEUE_RESUME_SIZE);
 
                 // Submit store operation to virtual thread for asynchronous execution.
                 List<MvnRecord> recordsToStore = List.copyOf(this.mySqlpSqlList);
                 this.storeExecutor.submit(() -> {
-                    this.storeSQL(this.dbType, recordsToStore, counter);
+                    this.databaseRepository.storeSQL(recordsToStore, counter);
                 });
 
                 // Clear the Cached Object
@@ -431,11 +518,11 @@ public class MvnScanner implements AutoCloseable {
             // Save mongodbBatchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.mongoDocList.size() >= this.mongodbBatchSize || force) {
-                this.avoidOverload(40, 10);
+                this.avoidOverload(MONGODB_QUEUE_MAX_SIZE, MONGODB_QUEUE_RESUME_SIZE);
 
                 List<Document> docsToStore = List.copyOf(this.mongoDocList);
                 this.storeExecutor.submit(() -> {
-                    this.storeMongoDB(docsToStore, counter);
+                    this.databaseRepository.storeMongoDB(docsToStore, counter);
                 });
 
                 // Clear the Cached Object
@@ -444,133 +531,6 @@ public class MvnScanner implements AutoCloseable {
         }
     }
 
-    /**
-     * Store MySQL/PSQL records asynchronously using virtual threads.
-     * Each virtual thread has its own EntityManager instance for thread-safe access.
-     * No synchronization needed - EntityManagerFactory and connection pool are thread-safe.
-     *
-     * @param storeList List of records to persist (independent copy, not shared)
-     * @param counter Record counter for logging
-     */
-    private void storeSQL(DatabaseType dbtype, List<MvnRecord> storeList, final long counter) {
-        String url = dbtype == DatabaseType.MYSQL ? MYSQL_URL : PSQL_URL;
-        Properties props = dbtype == DatabaseType.MYSQL ? MYSQL_CONNECTION_PROPS : PSQL_CONNECTION_PROPS;
-        int batchWriteSize = dbtype == DatabaseType.MYSQL ? this.mysqlBatchWriteSize : this.psqlBatchWriteSize;
-
-        try (Connection conn = DriverManager.getConnection(url, props)) {
-            LocalDateTime begin = LocalDateTime.now();
-            conn.setAutoCommit(false);
-
-            String sqlGav = """
-                INSERT INTO mavendb.gav (
-                    seqid,
-                    major_version, version_seq,
-                    record_modified, file_modified, file_size, 
-                    has_signature, has_sources, has_javadoc,
-                    sha1,
-                    group_id, artifact_id, artifact_version,
-                    classifier, packaging, file_extension,
-                    name, description,
-                    json
-                ) VALUES (
-                    ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?,
-                    ?
-                )
-            """;
-
-            try (PreparedStatement pstmt = conn.prepareStatement(sqlGav)) {
-                int batchCount = 0;
-                for (MvnRecord record : storeList) {
-                    // Note. We did not do string cut here, so the SQL will fail if the data is too long
-                    //       We need to watch out the errors in case happens
-
-                    pstmt.setLong(1, record.seqid);
-
-                    pstmt.setInt(2, record.majorVersion);
-                    pstmt.setLong(3, record.versionSeq);
-
-                    pstmt.setObject(4, record.json.getLong("recordModified"));   record.json.remove("recordModified");
-                    pstmt.setObject(5, record.json.getLong("fileModified"));     record.json.remove("fileModified");
-                    pstmt.setObject(6, record.json.getLong("fileSize"));         record.json.remove("fileSize");
-
-                    pstmt.setBoolean(7, record.json.getBoolean("hasSignature")); record.json.remove("hasSignature");
-                    pstmt.setBoolean(8, record.json.getBoolean("hasSources"));   record.json.remove ("hasSources");
-                    pstmt.setBoolean(9, record.json.getBoolean("hasJavadoc"));   record.json.remove ("hasJavadoc");
-
-                    pstmt.setString(10, record.json.getString("sha1"));          record.json.remove("sha1");
-
-                    pstmt.setString(11, record.json.getString("groupId"));       record.json.remove("groupId");
-                    pstmt.setString(12, record.json.getString("artifactId"));    record.json.remove("artifactId");
-                    pstmt.setString(13, record.json.getString("version"));       record.json.remove("version");
-
-                    pstmt.setString(14, record.json.getString("classifier"));    record.json.remove("classifier");
-                    pstmt.setString(15, record.json.getString("packaging"));     record.json.remove("packaging");
-                    pstmt.setString(16, record.json.getString("fileExtension")); record.json.remove("fileExtension");
-
-                    pstmt.setString(17, record.json.getString("name"));          record.json.remove("name");
-                    pstmt.setString(18, record.json.getString("description"));   record.json.remove("description");
-
-                    // Remove _id from json if it's the only field left
-                    if (record.json.size() == 1) {
-                        record.json.remove("_id");
-                    }
-
-                    if (dbtype == DatabaseType.MYSQL) {
-                        if (record.json.size() == 0) {
-                            pstmt.setString(19, null);
-                        } else {
-                            pstmt.setString(19, record.json.toJson());
-                        }
-
-                    } else if (dbtype == DatabaseType.PSQL) {
-                        if (record.json.size() == 0) {
-                            pstmt.setObject(19, null, java.sql.Types.OTHER);
-                        } else {
-                            PGobject jsonObject = new PGobject();
-                            jsonObject.setType("jsonb");
-                            jsonObject.setValue(record.json.toJson());
-                            pstmt.setObject(19, jsonObject);
-                        }
-                    }
-
-                    pstmt.addBatch();
-
-                    // Execute write batch every records to avoid large batches
-                    batchCount++;
-                    if (batchCount % batchWriteSize == 0) {
-                        pstmt.executeBatch();
-                        conn.commit();
-                    }
-                }
-                // Execute remaining batch
-                pstmt.executeBatch();
-                conn.commit();
-            }
-            Duration duration = Duration.between(begin, LocalDateTime.now());
-            LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
-                new Object[]{counter, duration.toSeconds(), storeList.size()});
-        } catch ( SQLException e) {
-            LOG.log(Level.SEVERE, "Error during MySQL persist operation for records counter=" + counter, e);
-        }
-    }
-
-    private void storeMongoDB(List<Document> storeDocuments, final long counter) {
-        LocalDateTime begin = LocalDateTime.now();
-        this.mongoClient.getDatabase(this.mongoDatabase).getCollection(this.indexId).insertMany(
-            storeDocuments,
-            new InsertManyOptions().ordered(false)
-        );
-        Duration duration = Duration.between(begin, LocalDateTime.now());
-        LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
-            new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
-    }
 
     private void createIndexesMongoDB() {
         long start = System.currentTimeMillis();

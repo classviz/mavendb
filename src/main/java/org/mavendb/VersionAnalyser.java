@@ -56,7 +56,6 @@ public final class VersionAnalyser {
      *
      * @param version Version string
      */
-    @SuppressWarnings({"checkstyle:MagicNumber", "java:S3776"}) // java:S3776 - Cognitive Complexity of methods should not be too high
     public VersionAnalyser(final String version) {
         if (version == null) {
             this.majorVersionResult = 0;
@@ -80,7 +79,7 @@ public final class VersionAnalyser {
             if (tokenizer.hasMoreTokens()) {
                 majorVersionStr = tokenizer.nextToken();
                 majorVersion = NumberUtils.toLong(majorVersionStr);
-                majorVersion = (majorVersion > VersionAnalyser.MAJOR_VERSION_MAX) ? VersionAnalyser.MAJOR_VERSION_MAX : majorVersion;
+                majorVersion = (majorVersion > MAJOR_VERSION_MAX) ? MAJOR_VERSION_MAX : majorVersion;
             }
             if (tokenizer.hasMoreTokens()) {
                 minorVersion = NumberUtils.toLong(tokenizer.nextToken());
@@ -96,7 +95,7 @@ public final class VersionAnalyser {
         }
 
         long seq;
-        if (majorVersion == VersionAnalyser.MAJOR_VERSION_MAX) {
+        if (majorVersion == MAJOR_VERSION_MAX) {
             // We suspect the version string is usually a year.month.date
             // So we set major version as the year
             String upTo4char = majorVersionStr.substring(0, Math.min(majorVersionStr.length(), YEAR_LENGTH));
@@ -104,7 +103,7 @@ public final class VersionAnalyser {
             seq = shrinkLong(NumberUtils.toLong(majorVersionStr),
                     MAJOR_VERSION_MAX_YEAR) * 1000000000L + shrinkLong(minorVersion, 999999) * 1000L + shrinkLong(increVersion, 999);
         } else {
-            // All other cases
+            // All other cases: standard semantic versioning
             seq = majorVersion * 10000000000000000L
                     + shrinkLong(minorVersion, 9999) * 1000000000000L
                     + shrinkLong(increVersion, 999999) * 1000000L
