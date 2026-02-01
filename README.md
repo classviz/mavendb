@@ -91,9 +91,10 @@ How to Run the Tool
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
-| Jan 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,050,052` + `2,052,228`
-| Jan 2026 |    `89,587,849`  |  `1.0` hour | PSQL    | `2,743,874` + `801,817`
-| Jan 2026 |    `89,587,849`  | `26.2` min  | Mongodb | `1,144,533` + `427,491`
+| Jan 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,097,334` + `1,980,766`
+| Jan 2026 |    `89,587,849`  |  `1.0` hour | PSQL    | `2,691,373` + `882,647`
+| Jan 2026 |    `89,587,849`  | `26.2` min  | Mongodb | `1,144,533` + `427,491` vs 7,082,913 + 2,482,368 
+
 
 
 ## Access
@@ -268,3 +269,7 @@ record=Record{
   Key{name='hasSignature', type=Boolean}=true, name=hasSignature, type=Boolean
   Key{name='fileModified', type=Long}=1692943727000, name=fileModified, type=Long
 ```
+
+### Run Script inside Docker
+
+docker exec -i mavendb-mysql mysql -u <username> -p<password> < /path/to/your/script.sql

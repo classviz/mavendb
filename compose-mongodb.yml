@@ -6,6 +6,8 @@ services:
   mongodb:
     # https://hub.docker.com/_/mongo
     image: mongo
+    hostname: mavendb-mongo
+    container_name: mavendb-mongo
     restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
@@ -17,11 +19,13 @@ services:
 
   mongo-express:
     image: mongo-express
+    hostname: mavendb-mongo-express
+    container_name: mavendb-mongo-express
     restart: always
     ports:
       - 8081:8081
     environment:
-      ME_CONFIG_MONGODB_URL: mongodb://root:${MONGO_ROOT_PASSWORD}@mongodb:27017/
+      ME_CONFIG_MONGODB_URL: mongodb://root:${MONGO_ROOT_PASSWORD}@mavendb-mongo:27017/
       ME_CONFIG_BASICAUTH_ENABLED: true
       ME_CONFIG_BASICAUTH_USERNAME: root
       ME_CONFIG_BASICAUTH_PASSWORD: "${MONGO_ROOT_PASSWORD}"

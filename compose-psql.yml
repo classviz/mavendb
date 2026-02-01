@@ -6,8 +6,8 @@ services:
 
   postgresdb:
     image: postgres:18
-    container_name: postgresdb
-    hostname: postgresdb
+    hostname: mavendb-psql
+    container_name: mavendb-psql
     restart: always
     environment:
       POSTGRES_USER: mavendbadmin
@@ -32,10 +32,11 @@ services:
 
   postgres-adminer:
     image: adminer
-    hostname: postgres-adminer
+    hostname: mavendb-psql-adminer
+    container_name: mavendb-psql-adminer
     restart: always
     environment:
-      ADMINER_DEFAULT_SERVER: 'postgresdb'
+      ADMINER_DEFAULT_SERVER: 'mavendb-psql'
     ports:
       - ${PSQL_ADMINER_PORT}:8080
     networks:

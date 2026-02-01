@@ -1,42 +1,41 @@
 
 CREATE TABLE "g"(
   "group_id"                  TEXT,
-  "artifact_version_counter"  INTEGER, 
-  "major_version_counter"     INTEGER, 
-  "version_seq_max"           TEXT, 
-  "last_modified_max"         TEXT
+  "artifact_version_counter"  INTEGER,
+  "major_version_counter"     INTEGER,
+  "version_seq_max"           TEXT,
+  "file_modified_max"         TEXT
 );
 
 CREATE TABLE "ga"(
-  "group_id"                  TEXT, 
-  "artifact_id"               TEXT, 
-  "artifact_version_counter"  INTEGER, 
+  "group_id"                  TEXT,
+  "artifact_id"               TEXT,
+  "artifact_version_counter"  INTEGER,
   "major_version_counter"     INTEGER,
-  "version_seq_max"           TEXT, 
-  "last_modified_max"         TEXT
+  "version_seq_max"           TEXT,
+  "file_modified_max"         TEXT
 );
 
 CREATE TABLE "gav"(
-  "group_id"                  TEXT, 
-  "artifact_id"               TEXT, 
-  "artifact_version"          TEXT, 
+  "group_id"                  TEXT,
+  "artifact_id"               TEXT,
+  "artifact_version"          TEXT,
 
-  "file_name"                 TEXT, 
+  "file_name"                 TEXT,
 
-  "major_version"             INTEGER, 
-  "version_seq"               TEXT, 
+  "major_version"             INTEGER,
+  "version_seq"               TEXT,
 
-  "last_modified"             TEXT,
-  "size"                      TEXT, 
-  "sha1"                      TEXT, 
+  "file_modified"             TEXT,
+  "file_size"                 TEXT,
+  "sha1"                      TEXT,
 
-  "signature_exists"          INTEGER, 
-  "sources_exists"            INTEGER, 
-  "javadoc_exists"            INTEGER, 
+  "has_signature"          INTEGER,
+  "has_sources"            INTEGER,
+  "has_javadoc"            INTEGER,
 
-  "classifier"                TEXT, 
-  "classifier_length"         INTEGER, 
-  "file_extension"            TEXT, 
-  "packaging"                 TEXT, 
-  "name"                      TEXT 
+  "classifier"                TEXT,
+  "file_extension"            TEXT,
+  "packaging"                 TEXT,
+  "name"                      TEXT
 );

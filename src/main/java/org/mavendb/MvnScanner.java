@@ -3,6 +3,8 @@ package org.mavendb;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.Indexes;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -79,30 +81,10 @@ public class MvnScanner implements AutoCloseable {
 
     /**
      * Record representing a Maven artifact from the index.
-     * Uses a compact constructor to create a defensive copy of the mutable Document object.
+     * Uses we cannot create a defensive copy of the mutable Document object, or else we will haave performance issue.
      */
-    public record MvnRecord(Long seqid, Integer majorVersion, Long versionSeq, Document json) {
-        /**
-         * Compact constructor that creates a defensive copy of the mutable Document.
-         * This prevents external code from modifying the Document after the record is created.
-         */
-        public MvnRecord {
-            if (json != null) {
-                // Create a defensive copy of the Document to prevent external mutation
-                json = new Document(json);
-            }
-        }
-
-        /**
-         * Returns a defensive copy of the json Document to prevent external mutation.
-         *
-         * @return a copy of the json Document, or null if json is null
-         */
-        @Override
-        public Document json() {
-            return json == null ? null : new Document(json);
-        }
-    }
+    @SuppressFBWarnings("EI_EXPOSE_REP")
+    protected record MvnRecord(Long seqid, Integer majorVersion, Long versionSeq, Document json) {}
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());

@@ -72,8 +72,8 @@ services:
   # Database Admin Tool
   mysql-adminer:
     image: adminer
-    hostname: mavendb-adminer
-    container_name: mavendb-adminer
+    hostname: mavendb-mysql-adminer
+    container_name: mavendb-mysql-adminer
     restart: always
     environment:
       # Hostname of the DB Image
@@ -88,8 +88,8 @@ services:
   # Rest API
   mysql-mavendb-api:
     image: mevdschee/php-crud-api
-    hostname: mavendb-api
-    container_name: mavendb-api
+    hostname: mavendb-mysql-api
+    container_name: mavendb-mysql-api
     environment:
       PHP_CRUD_API_DRIVER: 'mysql'
       PHP_CRUD_API_ADDRESS: 'mysqldb'
