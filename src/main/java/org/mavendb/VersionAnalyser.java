@@ -6,7 +6,10 @@ import org.apache.commons.lang3.math.NumberUtils;
 /**
  * Version string analysis result.
  */
-public final class VersionAnalyser {
+final class VersionAnalyser {
+
+    protected static final String KEY_MAJOR_VERSION = "majorVersion";
+    protected static final String KEY_VERSION_SEQ = "versionSeq";
 
     private static final long MAJOR_VERSION_MAX = 922;
     private static final long MAJOR_VERSION_MAX_YEAR = 9223372036L;

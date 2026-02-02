@@ -3,13 +3,12 @@ package org.mavendb;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.mavendb.Main.DatabaseType;
 
 /**
  * Manages application configuration parsing and validation.
  * Handles batch sizes, thread pool configuration, and database credentials.
  */
-public class ConfigurationManager {
+class ConfigurationManager {
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(ConfigurationManager.class.getName());
@@ -24,22 +23,91 @@ public class ConfigurationManager {
     private static final String CONFIG_PSQL_PASSWORD = "org.mavendb.psql.password";
     private static final String CONFIG_PSQL_BATCH_SIZE = "org.mavendb.psql.batch.size";
     private static final String CONFIG_MONGODB_URL = "org.mavendb.mongodb.url";
-    private static final String CONFIG_MONGODB_DATABASE = "org.mavendb.mongodb.database.name";
     private static final String CONFIG_MONGODB_BATCH_SIZE = "org.mavendb.mongodb.batch.size";
     private static final String CONFIG_THREAD_POOL_SIZE = "org.mavendb.thread.pool.size";
 
     /* ------- Configuration Defaults ------- */
-    protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/mavendb";
-    protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/mavendb";
+    protected static final String DATABASE_NAME = "mavendb";
+    protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/" + DATABASE_NAME;
+    protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/" + DATABASE_NAME;
     private static final int DEFAULT_MYSQL_BATCH_SIZE = 20000;
     private static final int DEFAULT_PSQL_BATCH_SIZE = 20000;
     private static final int DEFAULT_MONGODB_BATCH_SIZE = 20000;
     private static final int MIN_BATCH_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 100000;
     private static final int MIN_THREAD_POOL_SIZE = 2;
-    private static final String DEFAULT_MONGODB_DATABASE = "mavendb";
 
     private final Properties config;
+
+    protected final Properties mysqlConnectionProps = new Properties();
+    protected final Properties psqlConnectionProps = new Properties();
+
+    private final int cacheMysqlBatchSize;
+    private final int cachePsqlBatchSize;
+    private final int cacheMongodbBatchSize;
+
+
+    /**
+     * Get database user from configuration with logging for blank values.
+     *
+     * @param configKey Configuration property key
+     * @return Database user name or empty string if not configured
+     */
+    private String getDatabaseUser(String configKey) {
+        String user = config.getProperty(configKey);
+        if (user == null || user.isBlank()) {
+            LOG.log(Level.WARNING, "{0} user not configured, using empty string", configKey);
+            return "";
+        }
+        return user;
+    }
+
+    /**
+     * Get database password from configuration with logging for blank values.
+     *
+     * @param configKey Configuration property key
+     * @return Database password or empty string if not configured
+     */
+    private String getDatabasePassword(String configKey) {
+        String password = config.getProperty(configKey);
+        if (password == null || password.isBlank()) {
+            LOG.log(Level.WARNING, "{0} password not configured, using empty string", configKey);
+            return "";
+        }
+        return password;
+    }
+
+    /**
+     * Parse and validate batch size from configuration with fallback to default.
+     *
+     * @param configKey Configuration property key
+     * @param defaultValue Default batch size if not configured
+     * @return Validated batch size
+     */
+    private int parseBatchSize(String configKey, int defaultValue) {
+        String batchSizeStr = config.getProperty(configKey);
+        if (batchSizeStr == null || batchSizeStr.isBlank()) {
+            LOG.log(Level.INFO, "{0} batch size not configured, using default: {1}",
+                    new Object[]{configKey, defaultValue});
+            return defaultValue;
+        }
+
+        try {
+            int batchSize = Integer.parseInt(batchSizeStr.trim());
+            if (batchSize < MIN_BATCH_SIZE || batchSize > MAX_BATCH_SIZE) {
+                LOG.log(Level.WARNING,
+                        "{0} batch size {1} is out of valid range [{2}, {3}], using default: {4}",
+                        new Object[]{configKey, batchSize, MIN_BATCH_SIZE, MAX_BATCH_SIZE, defaultValue});
+                return defaultValue;
+            }
+            LOG.log(Level.INFO, "{0} batch size configured: {1}", new Object[]{configKey, batchSize});
+            return batchSize;
+        } catch (NumberFormatException e) {
+            LOG.log(Level.WARNING, "{0} batch size configuration invalid: {1}, using default: {2}",
+                    new Object[]{configKey, batchSizeStr, defaultValue});
+            return defaultValue;
+        }
+    }
 
     /**
      * Constructor.
@@ -52,40 +120,31 @@ public class ConfigurationManager {
         if (config != null) {
             this.config.putAll(config);
         }
-    }
 
-    /**
-     * Parse and validate batch size from configuration with fallback to default.
-     *
-     * @param configKey Configuration property key
-     * @param defaultValue Default batch size if not configured
-     * @param dbType Database type for logging
-     * @return Validated batch size
-     */
-    private int parseBatchSize(String configKey, int defaultValue, DatabaseType dbType) {
-        String batchSizeStr = config.getProperty(configKey);
-        if (batchSizeStr == null || batchSizeStr.isBlank()) {
-            LOG.log(Level.INFO, "{0} batch size not configured, using default: {1}",
-                    new Object[]{dbType.name(), defaultValue});
-            return defaultValue;
-        }
+        // Initialize MySQL connection properties with defaults
+        mysqlConnectionProps.setProperty("allowPublicKeyRetrieval", "true");
+        mysqlConnectionProps.setProperty("cachePrepStmts", "true");
+        mysqlConnectionProps.setProperty("rewriteBatchedStatements", "true");
+        mysqlConnectionProps.setProperty("useCompression", "true");
+        mysqlConnectionProps.setProperty("useLocalSessionState", "true");
+        mysqlConnectionProps.setProperty("useServerPrepStmts", "true");
+        mysqlConnectionProps.setProperty("useSSL", "false");
+        mysqlConnectionProps.setProperty("zeroDateTimeBehavior", "CONVERT_TO_NULL");
 
-        try {
-            int batchSize = Integer.parseInt(batchSizeStr.trim());
-            if (batchSize < MIN_BATCH_SIZE || batchSize > MAX_BATCH_SIZE) {
-                LOG.log(Level.WARNING,
-                        "{0} batch size {1} is out of valid range [{2}, {3}], using default: {4}",
-                        new Object[]{dbType.name(), batchSize, MIN_BATCH_SIZE, MAX_BATCH_SIZE, defaultValue});
-                return defaultValue;
-            }
-            LOG.log(Level.INFO, "{0} batch size configured: {1}", new Object[]{dbType.name(), batchSize});
-            return batchSize;
-        } catch (NumberFormatException e) {
-            LOG.log(Level.WARNING, "{0} batch size configuration invalid: {1}, using default: {2}",
-                    new Object[]{dbType.name(), batchSizeStr, defaultValue});
-            return defaultValue;
-        }
-    }
+        mysqlConnectionProps.setProperty("user", this.getDatabaseUser(CONFIG_MYSQL_USER));
+        mysqlConnectionProps.setProperty("password", this.getDatabasePassword(CONFIG_MYSQL_PASSWORD));
+
+        // Initialize PSQL connection properties with defaults
+        psqlConnectionProps.setProperty("ssl", "false");
+        psqlConnectionProps.setProperty("user", this.getDatabaseUser(CONFIG_PSQL_USER));
+        psqlConnectionProps.setProperty("password", this.getDatabasePassword(CONFIG_PSQL_PASSWORD));
+
+        // Initialize batch sizes
+        this.cacheMysqlBatchSize = parseBatchSize(CONFIG_MYSQL_BATCH_SIZE, DEFAULT_MYSQL_BATCH_SIZE);
+        this.cachePsqlBatchSize = parseBatchSize(CONFIG_PSQL_BATCH_SIZE, DEFAULT_PSQL_BATCH_SIZE);
+        this.cacheMongodbBatchSize = parseBatchSize(CONFIG_MONGODB_BATCH_SIZE, DEFAULT_MONGODB_BATCH_SIZE);
+   }
+
 
     /**
      * Parse and validate thread pool size from configuration.
@@ -135,38 +194,6 @@ public class ConfigurationManager {
     }
 
     /**
-     * Get database user from configuration with logging for blank values.
-     *
-     * @param configKey Configuration property key
-     * @param dbType Database type for logging
-     * @return Database user name or empty string if not configured
-     */
-    public String getDatabaseUser(String configKey, DatabaseType dbType) {
-        String user = config.getProperty(configKey);
-        if (user == null || user.isBlank()) {
-            LOG.log(Level.WARNING, "{0} user not configured, using empty string", dbType.name());
-            return "";
-        }
-        return user;
-    }
-
-    /**
-     * Get database password from configuration with logging for blank values.
-     *
-     * @param configKey Configuration property key
-     * @param dbType Database type for logging
-     * @return Database password or empty string if not configured
-     */
-    public String getDatabasePassword(String configKey, DatabaseType dbType) {
-        String password = config.getProperty(configKey);
-        if (password == null || password.isBlank()) {
-            LOG.log(Level.WARNING, "{0} password not configured, using empty string", dbType.name());
-            return "";
-        }
-        return password;
-    }
-
-    /**
      * Get MongoDB URL from configuration.
      *
      * @return MongoDB connection URL
@@ -181,21 +208,12 @@ public class ConfigurationManager {
     }
 
     /**
-     * Get MongoDB database name from configuration.
-     *
-     * @return MongoDB database name or default if not configured
-     */
-    public String getMongodbDatabase() {
-        return config.getProperty(CONFIG_MONGODB_DATABASE, DEFAULT_MONGODB_DATABASE);
-    }
-
-    /**
      * Get MySQL batch size from configuration.
      *
      * @return MySQL batch size
      */
     public int getMysqlBatchSize() {
-        return parseBatchSize(CONFIG_MYSQL_BATCH_SIZE, DEFAULT_MYSQL_BATCH_SIZE, DatabaseType.MYSQL);
+        return this.cacheMysqlBatchSize;
     }
 
     /**
@@ -204,7 +222,7 @@ public class ConfigurationManager {
      * @return PostgreSQL batch size
      */
     public int getPsqlBatchSize() {
-        return parseBatchSize(CONFIG_PSQL_BATCH_SIZE, DEFAULT_PSQL_BATCH_SIZE, DatabaseType.PSQL);
+        return this.cachePsqlBatchSize;
     }
 
     /**
@@ -213,42 +231,6 @@ public class ConfigurationManager {
      * @return MongoDB batch size
      */
     public int getMongodbBatchSize() {
-        return parseBatchSize(CONFIG_MONGODB_BATCH_SIZE, DEFAULT_MONGODB_BATCH_SIZE, DatabaseType.MONGODB);
-    }
-
-    /**
-     * Configuration constants accessor.
-     *
-     * @return Configuration property key for MySQL user
-     */
-    public static String getConfigMysqlUser() {
-        return CONFIG_MYSQL_USER;
-    }
-
-    /**
-     * Configuration constants accessor.
-     *
-     * @return Configuration property key for MySQL password
-     */
-    public static String getConfigMysqlPassword() {
-        return CONFIG_MYSQL_PASSWORD;
-    }
-
-    /**
-     * Configuration constants accessor.
-     *
-     * @return Configuration property key for PostgreSQL user
-     */
-    public static String getConfigPsqlUser() {
-        return CONFIG_PSQL_USER;
-    }
-
-    /**
-     * Configuration constants accessor.
-     *
-     * @return Configuration property key for PostgreSQL password
-     */
-    public static String getConfigPsqlPassword() {
-        return CONFIG_PSQL_PASSWORD;
+        return this.cacheMongodbBatchSize;
     }
 }

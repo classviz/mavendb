@@ -35,6 +35,8 @@ services:
     hostname: mavendb-psql-adminer
     container_name: mavendb-psql-adminer
     restart: always
+    depends_on:
+      - postgresdb
     environment:
       ADMINER_DEFAULT_SERVER: 'mavendb-psql'
     ports:

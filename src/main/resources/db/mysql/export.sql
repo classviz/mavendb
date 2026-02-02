@@ -1,5 +1,4 @@
 
-
 SELECT
   group_id,
   artifact_version_counter,

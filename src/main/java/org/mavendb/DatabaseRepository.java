@@ -1,5 +1,9 @@
 package org.mavendb;
 
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
@@ -12,18 +16,30 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoClients;
+import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.InsertManyOptions;
+
+import org.apache.ibatis.jdbc.ScriptRunner;
 import org.bson.Document;
+import org.mavendb.Main.DatabaseType;
 import org.postgresql.util.PGobject;
 
 /**
  * Repository for database operations with support for MySQL, PostgreSQL, and MongoDB.
  * Handles all persistent storage operations for Maven records and documents.
  */
-public class DatabaseRepository {
+class DatabaseRepository {
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(DatabaseRepository.class.getName());
+
+    protected static final String JSON_FIELD_ID = "_id";
+
+    private static final List<DatabaseType> SUPPORTED_SQL_DB_TYPES = List.of(
+        DatabaseType.MYSQL,
+        DatabaseType.PSQL
+    );
 
     /* ------- SQL Field Indices ------- */
     private static final int SQL_IDX_SEQID = 1;
@@ -48,12 +64,9 @@ public class DatabaseRepository {
 
     private static final int SHA1_MAX_LENGTH = 40;
 
-    private final Main.DatabaseType dbType;
-    private final String sqlUrl;
+    private final DatabaseType dbType;
+    private final String dbUrl;
     private final Properties sqlConnectionProps;
-    private final MongoClient mongoClient;
-    private final String mongoDatabase;
-    private final String mongoIndexId;
 
     /**
      * Constructor for SQL-based repositories (MySQL/PostgreSQL).
@@ -62,33 +75,43 @@ public class DatabaseRepository {
      * @param sqlUrl JDBC connection URL
      * @param sqlConnectionProps Connection properties (will be defensively copied)
      */
-    public DatabaseRepository(Main.DatabaseType dbType, String sqlUrl, Properties sqlConnectionProps) {
+    protected DatabaseRepository(DatabaseType dbType, String sqlUrl, Properties sqlConnectionProps) {
         this.dbType = dbType;
-        this.sqlUrl = sqlUrl;
+        this.dbUrl = sqlUrl;
         // Create a defensive copy to prevent external mutation of connection properties
         this.sqlConnectionProps = new Properties();
         if (sqlConnectionProps != null) {
             this.sqlConnectionProps.putAll(sqlConnectionProps);
         }
-        this.mongoClient = null;
-        this.mongoDatabase = null;
-        this.mongoIndexId = null;
     }
 
     /**
      * Constructor for MongoDB repository.
      *
-     * @param mongoClient MongoDB client
-     * @param mongoDatabase MongoDB database name
-     * @param mongoIndexId Index ID for collection name
+     * @param mongoUrl MongoDB connection URL
+     */ 
+    protected DatabaseRepository(String mongoUrl) {
+        this(DatabaseType.MONGODB, mongoUrl, null);
+    }
+
+    /**
+     * Execute an SQL script.
+     *
      */
-    public DatabaseRepository(MongoClient mongoClient, String mongoDatabase, String mongoIndexId) {
-        this.dbType = Main.DatabaseType.MONGODB;
-        this.mongoClient = mongoClient;
-        this.mongoDatabase = mongoDatabase;
-        this.mongoIndexId = mongoIndexId;
-        this.sqlUrl = null;
-        this.sqlConnectionProps = null;
+    protected void executeSQLScript(String script) throws IOException, SQLException {
+        if (SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
+            try (Connection conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps);
+                Reader r = new FileReader(script, StandardCharsets.UTF_8)
+            ) {
+                long start = System.currentTimeMillis();
+                LOG.log(Level.INFO, "SQL {0} execution started", script);
+                conn.setAutoCommit(false);
+                new ScriptRunner(conn).runScript(r);
+                LOG.log(Level.INFO, "SQL {0} execution finished, execution time {1} ms", new Object[]{script, System.currentTimeMillis() - start});
+            }
+        } else {
+            throw new UnsupportedOperationException("SQL script execution is not supported for database type: " + this.dbType);
+        }
     }
 
     /**
@@ -97,8 +120,8 @@ public class DatabaseRepository {
      * @param storeList List of records to persist (independent copy, not shared)
      * @param counter Record counter for logging
      */
-    public void storeSQL(List<MvnScanner.MvnRecord> storeList, final long counter) {
-        try (Connection conn = DriverManager.getConnection(sqlUrl, sqlConnectionProps)) {
+    protected void storeSQL(List<Document> storeList, final long counter) {
+        try (Connection conn = DriverManager.getConnection(dbUrl, sqlConnectionProps)) {
             LocalDateTime begin = LocalDateTime.now();
             conn.setAutoCommit(false);
 
@@ -127,7 +150,7 @@ public class DatabaseRepository {
             """;
 
             try (PreparedStatement pstmt = conn.prepareStatement(sqlGav)) {
-                for (MvnScanner.MvnRecord record : storeList) {
+                for (Document record : storeList) {
                     bindSQLParameters(pstmt, record);
                     pstmt.addBatch();
                 }
@@ -150,73 +173,73 @@ public class DatabaseRepository {
      * @param record Maven record to bind
      * @throws SQLException if binding fails
      */
-    private void bindSQLParameters(PreparedStatement pstmt, MvnScanner.MvnRecord record) throws SQLException {
-        pstmt.setLong(SQL_IDX_SEQID, record.seqid());
+    protected void bindSQLParameters(PreparedStatement pstmt, Document record) throws SQLException {
+        pstmt.setLong(SQL_IDX_SEQID, record.getLong(JSON_FIELD_ID));
 
-        pstmt.setInt(SQL_IDX_MAJOR_VERSION, record.majorVersion());
-        pstmt.setLong(SQL_IDX_VERSION_SEQ, record.versionSeq());
+        pstmt.setInt(SQL_IDX_MAJOR_VERSION, record.getInteger(VersionAnalyser.KEY_MAJOR_VERSION));
+        pstmt.setLong(SQL_IDX_VERSION_SEQ, record.getLong(VersionAnalyser.KEY_VERSION_SEQ));
 
-        pstmt.setObject(SQL_IDX_RECORD_MODIFIED, record.json().getLong("recordModified"));
-        record.json().remove("recordModified");
-        pstmt.setObject(SQL_IDX_FILE_MODIFIED, record.json().getLong("fileModified"));
-        record.json().remove("fileModified");
-        pstmt.setObject(SQL_IDX_FILE_SIZE, record.json().getLong("fileSize"));
-        record.json().remove("fileSize");
+        pstmt.setObject(SQL_IDX_RECORD_MODIFIED, record.getLong("recordModified"));
+        record.remove("recordModified");
+        pstmt.setObject(SQL_IDX_FILE_MODIFIED, record.getLong("fileModified"));
+        record.remove("fileModified");
+        pstmt.setObject(SQL_IDX_FILE_SIZE, record.getLong("fileSize"));
+        record.remove("fileSize");
 
-        pstmt.setBoolean(SQL_IDX_HAS_SIGNATURE, record.json().getBoolean("hasSignature"));
-        record.json().remove("hasSignature");
-        pstmt.setBoolean(SQL_IDX_HAS_SOURCES, record.json().getBoolean("hasSources"));
-        record.json().remove("hasSources");
-        pstmt.setBoolean(SQL_IDX_HAS_JAVADOC, record.json().getBoolean("hasJavadoc"));
-        record.json().remove("hasJavadoc");
+        pstmt.setBoolean(SQL_IDX_HAS_SIGNATURE, record.getBoolean("hasSignature"));
+        record.remove("hasSignature");
+        pstmt.setBoolean(SQL_IDX_HAS_SOURCES, record.getBoolean("hasSources"));
+        record.remove("hasSources");
+        pstmt.setBoolean(SQL_IDX_HAS_JAVADOC, record.getBoolean("hasJavadoc"));
+        record.remove("hasJavadoc");
 
         // Shrink SHA1 field to maximum length of 40 if needed
-        String sha1Value = record.json().getString("sha1");
+        String sha1Value = record.getString("sha1");
         if (sha1Value != null && sha1Value.length() > SHA1_MAX_LENGTH) {
             sha1Value = sha1Value.substring(0, SHA1_MAX_LENGTH);
             LOG.warning("SHA1 value truncated to 40 characters: " + sha1Value + " for record " + record);
         }
         pstmt.setString(SQL_IDX_SHA1, sha1Value);
-        record.json().remove("sha1");
+        record.remove("sha1");
 
-        pstmt.setString(SQL_IDX_GROUP_ID, record.json().getString("groupId"));
-        record.json().remove("groupId");
-        pstmt.setString(SQL_IDX_ARTIFACT_ID, record.json().getString("artifactId"));
-        record.json().remove("artifactId");
-        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, record.json().getString("version"));
-        record.json().remove("version");
+        pstmt.setString(SQL_IDX_GROUP_ID, record.getString("groupId"));
+        record.remove("groupId");
+        pstmt.setString(SQL_IDX_ARTIFACT_ID, record.getString("artifactId"));
+        record.remove("artifactId");
+        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, record.getString("version"));
+        record.remove("version");
 
-        pstmt.setString(SQL_IDX_CLASSIFIER, record.json().getString("classifier"));
-        record.json().remove("classifier");
-        pstmt.setString(SQL_IDX_PACKAGING, record.json().getString("packaging"));
-        record.json().remove("packaging");
-        pstmt.setString(SQL_IDX_FILE_EXTENSION, record.json().getString("fileExtension"));
-        record.json().remove("fileExtension");
+        pstmt.setString(SQL_IDX_CLASSIFIER, record.getString("classifier"));
+        record.remove("classifier");
+        pstmt.setString(SQL_IDX_PACKAGING, record.getString("packaging"));
+        record.remove("packaging");
+        pstmt.setString(SQL_IDX_FILE_EXTENSION, record.getString("fileExtension"));
+        record.remove("fileExtension");
 
-        pstmt.setString(SQL_IDX_NAME, record.json().getString("name"));
-        record.json().remove("name");
-        pstmt.setString(SQL_IDX_DESCRIPTION, record.json().getString("description"));
-        record.json().remove("description");
+        pstmt.setString(SQL_IDX_NAME, record.getString("name"));
+        record.remove("name");
+        pstmt.setString(SQL_IDX_DESCRIPTION, record.getString("description"));
+        record.remove("description");
 
         // Remove _id from json if it's the only field left
-        if (record.json().size() == 1) {
-            record.json().remove("_id");
+        if (record.size() == 1) {
+            record.remove(JSON_FIELD_ID);
         }
 
         // Handle JSON field with database-specific types
-        if (dbType == Main.DatabaseType.MYSQL) {
-            if (record.json().size() == 0) {
+        if (dbType == DatabaseType.MYSQL) {
+            if (record.size() == 0) {
                 pstmt.setString(SQL_IDX_JSON, null);
             } else {
-                pstmt.setString(SQL_IDX_JSON, record.json().toJson());
+                pstmt.setString(SQL_IDX_JSON, record.toJson());
             }
-        } else if (dbType == Main.DatabaseType.PSQL) {
-            if (record.json().size() == 0) {
+        } else if (dbType == DatabaseType.PSQL) {
+            if (record.size() == 0) {
                 pstmt.setObject(SQL_IDX_JSON, null, java.sql.Types.OTHER);
             } else {
                 PGobject jsonObject = new PGobject();
                 jsonObject.setType("jsonb");
-                jsonObject.setValue(record.json().toJson());
+                jsonObject.setValue(record.toJson());
                 pstmt.setObject(SQL_IDX_JSON, jsonObject);
             }
         }
@@ -228,14 +251,30 @@ public class DatabaseRepository {
      * @param storeDocuments Documents to persist
      * @param counter Record counter for logging
      */
-    public void storeMongoDB(List<Document> storeDocuments, final long counter) {
+    protected void storeMongoDB(List<Document> storeDocuments, final long counter, final String mongoIndexId) {
         LocalDateTime begin = LocalDateTime.now();
-        mongoClient.getDatabase(mongoDatabase).getCollection(mongoIndexId).insertMany(
+        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
+            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(mongoIndexId).insertMany(
                 storeDocuments,
                 new InsertManyOptions().ordered(false)
-        );
+            );
+        }
         Duration duration = Duration.between(begin, LocalDateTime.now());
         LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
                 new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
+    }
+
+    protected void createIndexesMongoDB(String indexId) {
+        long start = System.currentTimeMillis();
+        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
+            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
+                Indexes.ascending("groupId"),
+                Indexes.ascending("artifactId"),
+                Indexes.ascending("version"),
+                Indexes.ascending("versionSeq"),
+                Indexes.ascending("majorVersion")
+            ));
+        }
+        LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});
     }
 }

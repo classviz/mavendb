@@ -82,6 +82,7 @@ How to Run the Tool
   * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb`
   * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql`
 
+
 ## Exeuction Time
 
 - Since maven central artifacts is keep improving, so the runtime will be longer and longer
@@ -93,8 +94,7 @@ How to Run the Tool
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
 | Jan 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,097,334` + `1,980,766`
 | Jan 2026 |    `89,587,849`  |  `1.0` hour | PSQL    | `2,691,373` + `882,647`
-| Jan 2026 |    `89,587,849`  | `26.2` min  | Mongodb | `1,144,533` + `427,491` vs 7,082,913 + 2,482,368 
-
+| Jan 2026 |    `89,587,849`  | `26.6` min  | Mongodb | `1,169,402` + `428,064`
 
 
 ## Access
