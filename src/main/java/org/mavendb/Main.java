@@ -6,9 +6,12 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.sql.SQLException;
+import java.util.Arrays;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
+
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -169,7 +172,7 @@ public class Main {
         private static final Option OPTION_DB_TYPE = Option.builder("d")
             .longOpt(OPTION_DB_TYPE_LONGOPT)
             .hasArg()
-            .desc("Database type, like mysql, mongodb, psql.")
+            .desc("Database type, like " + DatabaseType.names() + ".")
             .required()
             .get();
         /**
@@ -203,6 +206,11 @@ public class Main {
     static enum DatabaseType {
         MYSQL,
         MONGODB,
-        PSQL
+        PSQL,
+        SQLITE;
+
+        static String names() {
+            return Arrays.stream(DatabaseType.values()) .map(e -> e.name().toLowerCase()).collect(Collectors.joining(","));
+        }
     }
 }

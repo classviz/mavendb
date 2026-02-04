@@ -1,5 +1,6 @@
 package org.mavendb;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -20,6 +21,8 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.InsertManyOptions;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.bson.Document;
@@ -37,9 +40,10 @@ class DatabaseRepository {
 
     protected static final String JSON_FIELD_ID = "_id";
 
-    private static final List<DatabaseType> SUPPORTED_SQL_DB_TYPES = List.of(
+    protected static final List<DatabaseType> SUPPORTED_SQL_DB_TYPES = List.of(
         DatabaseType.MYSQL,
-        DatabaseType.PSQL
+        DatabaseType.PSQL,
+        DatabaseType.SQLITE
     );
 
     /* ------- SQL Field Indices ------- */
@@ -97,12 +101,14 @@ class DatabaseRepository {
 
     /**
      * Execute an SQL script.
-     *
      */
     protected void executeSQLScript(String script) throws IOException, SQLException {
         if (SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
+            // Directory for DB scripts are in the folder of "db/<dbtype>"
             try (Connection conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps);
-                Reader r = new FileReader(script, StandardCharsets.UTF_8)
+                Reader r = new FileReader(
+                    Main.getDirectoryFileName("db" + File.separator + this.dbType.name().toLowerCase(), script),
+                    StandardCharsets.UTF_8)
             ) {
                 long start = System.currentTimeMillis();
                 LOG.log(Level.INFO, "SQL {0} execution started", script);
@@ -121,13 +127,15 @@ class DatabaseRepository {
      * @param storeList List of records to persist (independent copy, not shared)
      * @param counter Record counter for logging
      */
+    @SuppressFBWarnings(value = "VA_FORMAT_STRING_USES_NEWLINE", justification = "False positive for Java text blocks")
     protected void storeSQL(List<Document> storeList, final long counter) {
-        try (Connection conn = DriverManager.getConnection(dbUrl, sqlConnectionProps)) {
+        try (Connection conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps)) {
             LocalDateTime begin = LocalDateTime.now();
             conn.setAutoCommit(false);
 
+            String tableName = this.dbType == DatabaseType.PSQL ? "mavendb.gav" : "gav";
             String sqlGav = """
-                INSERT INTO mavendb.gav (
+                INSERT INTO %s (
                     seqid,
                     major_version, version_seq,
                     record_modified, file_modified, file_size,
@@ -148,7 +156,7 @@ class DatabaseRepository {
                     ?, ?,
                     ?
                 )
-            """;
+            """.formatted(tableName);
 
             try (PreparedStatement pstmt = conn.prepareStatement(sqlGav)) {
                 for (Document record : storeList) {
@@ -242,6 +250,13 @@ class DatabaseRepository {
                 jsonObject.setType("jsonb");
                 jsonObject.setValue(record.toJson());
                 pstmt.setObject(SQL_IDX_JSON, jsonObject);
+            }
+        } else if (dbType == DatabaseType.SQLITE) {
+            // SQLite stores JSON as TEXT
+            if (record.size() == 0) {
+                pstmt.setString(SQL_IDX_JSON, null);
+            } else {
+                pstmt.setString(SQL_IDX_JSON, record.toJson());
             }
         }
     }

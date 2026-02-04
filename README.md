@@ -4,7 +4,7 @@ This application will scan all `maven` repos items and store them to database. S
 - `MongoDB`
 - `MySQL`
 - `PostgreSQL`
-- `sqlite`
+- `SQLite`
 
 ## Prepare Database
 
@@ -43,6 +43,22 @@ Step 2. Start
 
 Execute script [compose-psql.sh](compose-psql.sh)
 - `./compose-psql.sh`
+
+### Option: SQLite
+
+No setup required! SQLite stores everything in a single file.
+
+- Default database file: `mavendb.db` (created in the current directory)
+- Configure the path in [config.properties](src/main/resources/etc/config.properties):
+  ```properties
+  org.mavendb.sqlite.url=jdbc:sqlite:/path/to/mavendb.db
+  ```
+- **Performance Optimizations for 80-200 Million Records:**
+  - WAL (Write-Ahead Logging) mode enabled for better concurrency
+  - 64MB cache size for optimal performance
+  - Memory-mapped I/O (1GB) for faster reads
+  - Batch size of 20,000 records (configurable)
+  - Virtual threads for parallel writes
 
 
 ## Download Indexes

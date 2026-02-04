@@ -22,6 +22,8 @@ class ConfigurationManager {
     private static final String CONFIG_PSQL_USER = "org.mavendb.psql.user";
     private static final String CONFIG_PSQL_PASSWORD = "org.mavendb.psql.password";
     private static final String CONFIG_PSQL_BATCH_SIZE = "org.mavendb.psql.batch.size";
+    private static final String CONFIG_SQLITE_URL = "org.mavendb.sqlite.url";
+    private static final String CONFIG_SQLITE_BATCH_SIZE = "org.mavendb.sqlite.batch.size";
     private static final String CONFIG_MONGODB_URL = "org.mavendb.mongodb.url";
     private static final String CONFIG_MONGODB_BATCH_SIZE = "org.mavendb.mongodb.batch.size";
     private static final String CONFIG_THREAD_POOL_SIZE = "org.mavendb.thread.pool.size";
@@ -30,8 +32,10 @@ class ConfigurationManager {
     protected static final String DATABASE_NAME = "mavendb";
     protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/" + DATABASE_NAME;
     protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/" + DATABASE_NAME;
+    protected static final String DEFAULT_SQLITE_URL = "jdbc:sqlite:" + DATABASE_NAME + ".db";
     private static final int DEFAULT_MYSQL_BATCH_SIZE = 20000;
     private static final int DEFAULT_PSQL_BATCH_SIZE = 20000;
+    private static final int DEFAULT_SQLITE_BATCH_SIZE = 20000;
     private static final int DEFAULT_MONGODB_BATCH_SIZE = 20000;
     private static final int MIN_BATCH_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 100000;
@@ -41,9 +45,11 @@ class ConfigurationManager {
 
     protected final Properties mysqlConnectionProps = new Properties();
     protected final Properties psqlConnectionProps = new Properties();
+    protected final Properties sqliteConnectionProps = new Properties();
 
     private final int cacheMysqlBatchSize;
     private final int cachePsqlBatchSize;
+    private final int cacheSqliteBatchSize;
     private final int cacheMongodbBatchSize;
 
 
@@ -139,9 +145,24 @@ class ConfigurationManager {
         psqlConnectionProps.setProperty("user", this.getDatabaseUser(CONFIG_PSQL_USER));
         psqlConnectionProps.setProperty("password", this.getDatabasePassword(CONFIG_PSQL_PASSWORD));
 
+        // Initialize SQLite connection properties with performance optimizations
+        // Enable WAL mode for better concurrency and performance with large datasets
+        sqliteConnectionProps.setProperty("journal_mode", "WAL");
+        // Use NORMAL synchronous mode for better performance (still safe with WAL)
+        sqliteConnectionProps.setProperty("synchronous", "NORMAL");
+        // Increase cache size to 64MB for better performance with large datasets
+        sqliteConnectionProps.setProperty("cache_size", "-64000");
+        // Set page size to 4KB for optimal performance
+        sqliteConnectionProps.setProperty("page_size", "4096");
+        // Enable memory-mapped I/O for faster reads (1GB)
+        sqliteConnectionProps.setProperty("mmap_size", "1073741824");
+        // Increase temp store to memory for faster operations
+        sqliteConnectionProps.setProperty("temp_store", "MEMORY");
+
         // Initialize batch sizes
         this.cacheMysqlBatchSize = parseBatchSize(CONFIG_MYSQL_BATCH_SIZE, DEFAULT_MYSQL_BATCH_SIZE);
         this.cachePsqlBatchSize = parseBatchSize(CONFIG_PSQL_BATCH_SIZE, DEFAULT_PSQL_BATCH_SIZE);
+        this.cacheSqliteBatchSize = parseBatchSize(CONFIG_SQLITE_BATCH_SIZE, DEFAULT_SQLITE_BATCH_SIZE);
         this.cacheMongodbBatchSize = parseBatchSize(CONFIG_MONGODB_BATCH_SIZE, DEFAULT_MONGODB_BATCH_SIZE);
    }
 
@@ -194,6 +215,15 @@ class ConfigurationManager {
     }
 
     /**
+     * Get SQLite URL from configuration.
+     *
+     * @return SQLite connection URL
+     */
+    public String getSqliteUrl() {
+        return config.getProperty(CONFIG_SQLITE_URL, DEFAULT_SQLITE_URL);
+    }
+
+    /**
      * Get MongoDB URL from configuration.
      *
      * @return MongoDB connection URL
@@ -223,6 +253,15 @@ class ConfigurationManager {
      */
     public int getPsqlBatchSize() {
         return this.cachePsqlBatchSize;
+    }
+
+    /**
+     * Get SQLite batch size from configuration.
+     *
+     * @return SQLite batch size
+     */
+    public int getSqliteBatchSize() {
+        return this.cacheSqliteBatchSize;
     }
 
     /**

@@ -43,21 +43,6 @@ class MvnScanner {
      */
     private static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
 
-    /**
-     * SQL script to export data.
-     */
-    private static final String DB_EXPORT_SQL = "export.sql";
-
-    /**
-     * Directory for MySQL DB scripts.
-     */
-    private static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";
-
-    /**
-     * Directory for PSQL DB scripts.
-     */
-    private static final String DIR_DB_PSQL = "db" + File.separator + "psql";
-
     /* ------- Executor Configuration ------- */
     private static final int EXECUTOR_CORE_THREADS = 2;
     private static final int EXECUTOR_KEEP_ALIVE_SECONDS = 60;
@@ -203,12 +188,15 @@ class MvnScanner {
 
         if (this.dbType == DatabaseType.MYSQL) {
             this.databaseRepository = new DatabaseRepository(DatabaseType.MYSQL, configMgr.getMysqlUrl(), configMgr.mysqlConnectionProps);
-            this.databaseRepository.executeSQLScript(Main.getDirectoryFileName(DIR_DB_MYSQL, DB_CREATE_SQL));
+            this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.databaseRepository = new DatabaseRepository(configMgr.getMongodbUrl());
         } else if (this.dbType == DatabaseType.PSQL) {
             this.databaseRepository = new DatabaseRepository(DatabaseType.PSQL, configMgr.getPsqlUrl(), configMgr.psqlConnectionProps);
-            this.databaseRepository.executeSQLScript(Main.getDirectoryFileName(DIR_DB_PSQL, DB_CREATE_SQL));
+            this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
+        } else if (this.dbType == DatabaseType.SQLITE) {
+            this.databaseRepository = new DatabaseRepository(DatabaseType.SQLITE, configMgr.getSqliteUrl(), configMgr.sqliteConnectionProps);
+            this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
         }
 
         long start = System.currentTimeMillis();
@@ -219,10 +207,8 @@ class MvnScanner {
         LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
         // Refresh Data
-        if (this.dbType == DatabaseType.MYSQL) {
-            this.databaseRepository.executeSQLScript(Main.getDirectoryFileName(DIR_DB_MYSQL, DB_DATA_REFRESH_SQL));
-        } else if (this.dbType == DatabaseType.PSQL) {
-            this.databaseRepository.executeSQLScript(Main.getDirectoryFileName(DIR_DB_PSQL, DB_DATA_REFRESH_SQL));
+        if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
+            this.databaseRepository.executeSQLScript(DB_DATA_REFRESH_SQL);
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.databaseRepository.createIndexesMongoDB(this.indexId);
         }
@@ -376,10 +362,17 @@ class MvnScanner {
             return;
         }
 
-        if (this.dbType == DatabaseType.MYSQL || this.dbType == DatabaseType.PSQL) {
-            int batchSize = this.dbType == DatabaseType.MYSQL ? this.configMgr.getMysqlBatchSize() : this.configMgr.getPsqlBatchSize();
+        if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
+            int batchSize;
+            if (this.dbType == DatabaseType.MYSQL) {
+                batchSize = this.configMgr.getMysqlBatchSize();
+            } else if (this.dbType == DatabaseType.PSQL) {
+                batchSize = this.configMgr.getPsqlBatchSize();
+            } else {
+                batchSize = this.configMgr.getSqliteBatchSize();
+            }
 
-            // Save mysqlBatchSize records as a group,
+            // Save batchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.dataToBeStored.size() >= batchSize || force) {
                 // The maxQueueSize will decide the memory usage
