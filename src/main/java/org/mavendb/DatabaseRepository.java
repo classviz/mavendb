@@ -20,6 +20,7 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.InsertManyOptions;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.bson.Document;
 import org.mavendb.Main.DatabaseType;
@@ -194,7 +195,7 @@ class DatabaseRepository {
         record.remove("hasJavadoc");
 
         // Shrink SHA1 field to maximum length of 40 if needed
-        String sha1Value = record.getString("sha1");
+        String sha1Value = strip(record.getString("sha1"));
         if (sha1Value != null && sha1Value.length() > SHA1_MAX_LENGTH) {
             sha1Value = sha1Value.substring(0, SHA1_MAX_LENGTH);
             LOG.warning("SHA1 value truncated to 40 characters: " + sha1Value + " for record " + record);
@@ -202,23 +203,23 @@ class DatabaseRepository {
         pstmt.setString(SQL_IDX_SHA1, sha1Value);
         record.remove("sha1");
 
-        pstmt.setString(SQL_IDX_GROUP_ID, record.getString("groupId"));
+        pstmt.setString(SQL_IDX_GROUP_ID, strip(record.getString("groupId")));
         record.remove("groupId");
-        pstmt.setString(SQL_IDX_ARTIFACT_ID, record.getString("artifactId"));
+        pstmt.setString(SQL_IDX_ARTIFACT_ID, strip(record.getString("artifactId")));
         record.remove("artifactId");
-        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, record.getString("version"));
+        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, strip(record.getString("version")));
         record.remove("version");
 
-        pstmt.setString(SQL_IDX_CLASSIFIER, record.getString("classifier"));
+        pstmt.setString(SQL_IDX_CLASSIFIER, strip(record.getString("classifier")));
         record.remove("classifier");
-        pstmt.setString(SQL_IDX_PACKAGING, record.getString("packaging"));
+        pstmt.setString(SQL_IDX_PACKAGING, strip(record.getString("packaging")));
         record.remove("packaging");
-        pstmt.setString(SQL_IDX_FILE_EXTENSION, record.getString("fileExtension"));
+        pstmt.setString(SQL_IDX_FILE_EXTENSION, strip(record.getString("fileExtension")));
         record.remove("fileExtension");
 
-        pstmt.setString(SQL_IDX_NAME, record.getString("name"));
+        pstmt.setString(SQL_IDX_NAME, strip(record.getString("name")));
         record.remove("name");
-        pstmt.setString(SQL_IDX_DESCRIPTION, record.getString("description"));
+        pstmt.setString(SQL_IDX_DESCRIPTION, strip(record.getString("description")));
         record.remove("description");
 
         // Remove _id from json if it's the only field left
@@ -243,6 +244,13 @@ class DatabaseRepository {
                 pstmt.setObject(SQL_IDX_JSON, jsonObject);
             }
         }
+    }
+
+    /**
+     * Strip leading/trailing whitespace and double quotes from input string.
+     */
+    private String strip(String input) {
+        return StringUtils.strip(StringUtils.stripToNull(input), "\"");
     }
 
     /**

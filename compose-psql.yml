@@ -4,7 +4,7 @@ networks:
 
 services:
 
-  postgresdb:
+  mavendb-psql:
     image: postgres:18
     hostname: mavendb-psql
     container_name: mavendb-psql
@@ -30,13 +30,13 @@ services:
     networks:
       - psqlnet
 
-  postgres-adminer:
+  mavendb-psql-adminer:
     image: adminer
     hostname: mavendb-psql-adminer
     container_name: mavendb-psql-adminer
     restart: always
     depends_on:
-      - postgresdb
+      - mavendb-psql
     environment:
       ADMINER_DEFAULT_SERVER: 'mavendb-psql'
     ports:

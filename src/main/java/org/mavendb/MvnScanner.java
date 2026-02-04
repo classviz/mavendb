@@ -44,6 +44,11 @@ class MvnScanner {
     private static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
 
     /**
+     * SQL script to export data.
+     */
+    private static final String DB_EXPORT_SQL = "export.sql";
+
+    /**
      * Directory for MySQL DB scripts.
      */
     private static final String DIR_DB_MYSQL = "db" + File.separator + "mysql";

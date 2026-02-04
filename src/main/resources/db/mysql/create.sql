@@ -82,25 +82,30 @@ CREATE TABLE         `ga` (
 DROP VIEW IF EXISTS v_gav;
 CREATE VIEW         v_gav AS
 SELECT
-  group_id,
-  artifact_id,
-  artifact_version,
-  file_name,
-  major_version,
-  version_seq,
-  file_modified,
-  concat('mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
-    if(isnull(classifier),
+    group_id,
+    artifact_id,
+    artifact_version,
+    major_version,
+    version_seq,
+
+    classifier,
+    packaging,
+
+    file_name,
+    file_size,
+    file_extension,
+    file_modified,
+    record_modified,
+
+    has_signature,
+    has_sources,
+    has_javadoc,
+
+    concat('mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
+      if(isnull(classifier),
         concat(group_id, ':', artifact_id, ':', artifact_version,':', file_extension),
         concat(group_id, ':', artifact_id, ':', artifact_version,':', file_extension, ':', classifier)
-    ))                                                 AS mvn_command,
+      ))                                                 AS mvn_command,
 
-  file_size,
-  classifier,
-  file_extension,
-  packaging,
-  name,
-  description
-
-FROM gav
-;
+    name
+FROM gav;

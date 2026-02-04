@@ -3,6 +3,7 @@
 This application will scan all `maven` repos items and store them to database. Supported database
 - `MongoDB`
 - `MySQL`
+- `PostgreSQL`
 - `sqlite`
 
 ## Prepare Database
@@ -228,48 +229,88 @@ DESCRIPTOR = 1
 
 ```
 record=Record{
-    type=ARTIFACT_ADD,
-    expanded={
-        Key{name='Bundle-License', type=String}=https://www.apache.org/licenses/LICENSE-2.0.txt, 
-        Key{name='version', type=String}=17-0.9.2, 
-        Key{name='groupId', type=String}=us.ihmc, 
-        Key{name='Bundle-Name', type=String}=sourceJar, 
-        Key{name='packaging', type=String}=jar, 
-        Key{name='description', type=String}=SCS2 Simulation, 
-        Key{name='hasJavadoc', type=Boolean}=false, 
-        Key{name='sha1', type=String}=8a16ffef75fef5f5c46d4290ef126ac59f71fcf9, 
-        Key{name='recordModified', type=Long}=1765382166548, 
-        Key{name='fileSize', type=Long}=229462, 
-        Key{name='Bundle-Version', type=String}=17-0.9.2, 
-        Key{name='fileExtension', type=String}=jar, 
-        Key{name='classifier', type=String}=sources, 
-        Key{name='name', type=String}=scs2-simulation, 
-        Key{name='artifactId', type=String}=scs2-simulation, 
-        Key{name='hasSources', type=Boolean}=false, 
-        Key{name='hasSignature', type=Boolean}=false, 
-        Key{name='fileModified', type=Long}=1657893876000
-      }
+  type=ARTIFACT_ADD,
+  expanded={
+      Key{name='Bundle-License', type=String}=https://www.apache.org/licenses/LICENSE-2.0.txt, 
+      Key{name='version', type=String}=17-0.9.2, 
+      Key{name='groupId', type=String}=us.ihmc, 
+      Key{name='Bundle-Name', type=String}=sourceJar, 
+      Key{name='packaging', type=String}=jar, 
+      Key{name='description', type=String}=SCS2 Simulation, 
+      Key{name='hasJavadoc', type=Boolean}=false, 
+      Key{name='sha1', type=String}=8a16ffef75fef5f5c46d4290ef126ac59f71fcf9, 
+      Key{name='recordModified', type=Long}=1765382166548, 
+      Key{name='fileSize', type=Long}=229462, 
+      Key{name='Bundle-Version', type=String}=17-0.9.2, 
+      Key{name='fileExtension', type=String}=jar, 
+      Key{name='classifier', type=String}=sources, 
+      Key{name='name', type=String}=scs2-simulation, 
+      Key{name='artifactId', type=String}=scs2-simulation, 
+      Key{name='hasSources', type=Boolean}=false, 
+      Key{name='hasSignature', type=Boolean}=false, 
+      Key{name='fileModified', type=Long}=1657893876000
   }
+}
 ```
 
 ```
-  Key{name='version', type=String}=2.7.15.0, name=version, type=String
-  Key{name='groupId', type=String}=xyz.opcal.cloud, name=groupId, type=String
-  Key{name='packaging', type=String}=jar, name=packaging, type=String
-  Key{name='description', type=String}=logback api for webflux request, name=description, type=String
-  Key{name='hasJavadoc', type=Boolean}=false, name=hasJavadoc, type=Boolean
-  Key{name='sha1', type=String}=2cb6eeb2b4e0bd77fd00f661d69b69db4ff098ad, name=sha1, type=String
-  Key{name='recordModified', type=Long}=1765379584124, name=recordModified, type=Long
-  Key{name='fileSize', type=Long}=371874, name=fileSize, type=Long
-  Key{name='fileExtension', type=String}=jar, name=fileExtension, type=String
-  Key{name='classifier', type=String}=javadoc, name=classifier, type=String
-  Key{name='name', type=String}=opcal-cloud-commons-logback-webflux, name=name, type=String
-  Key{name='artifactId', type=String}=opcal-cloud-commons-logback-webflux, name=artifactId, type=String
-  Key{name='hasSources', type=Boolean}=false, name=hasSources, type=Boolean
-  Key{name='hasSignature', type=Boolean}=true, name=hasSignature, type=Boolean
-  Key{name='fileModified', type=Long}=1692943727000, name=fileModified, type=Long
+Key{name='version', type=String}=2.7.15.0, name=version, type=String
+Key{name='groupId', type=String}=xyz.opcal.cloud, name=groupId, type=String
+Key{name='packaging', type=String}=jar, name=packaging, type=String
+Key{name='description', type=String}=logback api for webflux request, name=description, type=String
+Key{name='hasJavadoc', type=Boolean}=false, name=hasJavadoc, type=Boolean
+Key{name='sha1', type=String}=2cb6eeb2b4e0bd77fd00f661d69b69db4ff098ad, name=sha1, type=String
+Key{name='recordModified', type=Long}=1765379584124, name=recordModified, type=Long
+Key{name='fileSize', type=Long}=371874, name=fileSize, type=Long
+Key{name='fileExtension', type=String}=jar, name=fileExtension, type=String
+Key{name='classifier', type=String}=javadoc, name=classifier, type=String
+Key{name='name', type=String}=opcal-cloud-commons-logback-webflux, name=name, type=String
+Key{name='artifactId', type=String}=opcal-cloud-commons-logback-webflux, name=artifactId, type=String
+Key{name='hasSources', type=Boolean}=false, name=hasSources, type=Boolean
+Key{name='hasSignature', type=Boolean}=true, name=hasSignature, type=Boolean
+Key{name='fileModified', type=Long}=1692943727000, name=fileModified, type=Long
 ```
 
-### Run Script inside Docker
+### Commands
 
 docker exec -i mavendb-mysql mysql -u <username> -p<password> < /path/to/your/script.sql
+
+Restart
+
+```sh
+sudo docker compose -f compose-mysql.yml   restart
+sudo docker compose -f compose-mongodb.yml restart
+sudo docker compose -f compose-psql.yml    restart
+```
+
+MySQL
+
+```sh
+# Export tables to CSV
+mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM g"     | sed 's/\t/,/g' > g.csv
+mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM ga"    | sed 's/\t/,/g' > ga.csv
+mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM v_gav" | sed 's/\t/,/g' > gav.csv
+
+# Backup and Restore DB
+mysqldump --host=127.0.0.1 --port=3306 -u mavendbadmin -p mavendb | gzip > mavendb-mysql.sql.gz
+```
+
+
+PSQL
+
+```sh
+# We need the pg client
+sudo apt install postgresql-client
+
+# Sample query
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "SELECT * FROM mavendb.g limit 10"
+
+# Export tables to CSV
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.g)     TO 'g.csv'   WITH (FORMAT CSV, HEADER);"
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.ga)    TO 'ga.csv'  WITH (FORMAT CSV, HEADER);"
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.v_gav) TO 'gav.csv' WITH (FORMAT CSV, HEADER);"
+
+# Backup and Restore DB
+pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
+psql -f mavendb-psql.sql postgres
+```

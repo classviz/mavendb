@@ -53,9 +53,6 @@ services:
       # Passwords are subjected to be changed based on your requirement
       MYSQL_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
-    volumes:
-      # Where dump data will be stored
-      - ./mysql-files:/var/lib/mysql-files
     deploy:
       resources:
         reservations:
@@ -70,7 +67,7 @@ services:
       - mavendbmysqlnet
  
   # Database Admin Tool
-  mysql-adminer:
+  mavendb-mysql-adminer:
     image: adminer
     hostname: mavendb-mysql-adminer
     container_name: mavendb-mysql-adminer
@@ -86,7 +83,7 @@ services:
       - mavendbmysqlnet
 
   # Rest API
-  mysql-mavendb-api:
+  mavendb-mysql-api:
     image: mevdschee/php-crud-api
     hostname: mavendb-mysql-api
     container_name: mavendb-mysql-api
@@ -99,6 +96,8 @@ services:
       PHP_CRUD_API_USERNAME: 'mavendbadmin'
       PHP_CRUD_API_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
       PHP_CRUD_API_DEBUG: 1
+    depends_on:
+      - mavendb-mysql
     ports:
       - "2080:80"
     networks:

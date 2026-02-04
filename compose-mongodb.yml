@@ -3,7 +3,7 @@ networks:
     driver: bridge
 
 services:
-  mongodb:
+  mavendb-mongo:
     # https://hub.docker.com/_/mongo
     image: mongo
     hostname: mavendb-mongo
@@ -17,7 +17,7 @@ services:
     networks:
       - mavendbmongonet
 
-  mongo-express:
+  mavendb-mongo-express:
     image: mongo-express
     hostname: mavendb-mongo-express
     container_name: mavendb-mongo-express
@@ -30,6 +30,6 @@ services:
       ME_CONFIG_BASICAUTH_USERNAME: root
       ME_CONFIG_BASICAUTH_PASSWORD: "${MONGO_ROOT_PASSWORD}"
     depends_on:
-      - mongodb
+      - mavendb-mongo
     networks:
       - mavendbmongonet

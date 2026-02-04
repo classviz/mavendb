@@ -105,10 +105,21 @@ SELECT
     group_id,
     artifact_id,
     artifact_version,
-    file_name,
     major_version,
     version_seq,
+
+    classifier,
+    packaging,
+
+    file_name,
+    file_size,
+    file_extension,
     file_modified,
+    record_modified,
+
+    has_signature,
+    has_sources,
+    has_javadoc,
 
     concat(
         'mvn dependency:copy -U -DoutputDirectory=. -Dartifact=',
@@ -120,10 +131,5 @@ SELECT
         END
     ) AS mvn_command,
 
-    classifier,
-    file_size,
-    file_extension,
-    packaging,
-    name,
-    description
+    name
 FROM gav;
