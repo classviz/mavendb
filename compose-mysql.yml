@@ -16,6 +16,8 @@ services:
     #
     # innodb_flush_log_at_trx_commit:
     #   For batch operations where absolute ACID compliance for every single intermediate write is not critical, setting this to 0 or 2 can improve write performance, though at the risk of losing a few seconds of data in a crash.
+    # max_allowed_packet:
+    #   Set max_allowed_packet = 1G, This is the safest and most future‑proof value. MySQL supports up to 1GB for this variable.
     command:
       --bulk_insert_buffer_size=128M
       --character-set-server=utf8mb4
@@ -28,14 +30,18 @@ services:
       --innodb_file_per_table=1
       --innodb_flush_log_at_timeout=4
       --innodb_flush_log_at_trx_commit=2
+      --innodb_flush_method=O_DIRECT
       --innodb_log_buffer_size=256M
-      --innodb_log_file_size=1G
+      --innodb_log_file_size=4G
       --innodb_log_files_in_group=4
+      --innodb_read_io_threads=16
       --innodb_sort_buffer_size=512M
+      --innodb_write_io_threads=16
       --local_infile=1
       --log_queries_not_using_indexes=1
       --long_query_time=2
-      --max_connections=100
+      --max_allowed_packet=1G
+      --max_connections=32
       --max_heap_table_size=5G
       --mysql_native_password=ON
       --read_rnd_buffer_size=512M

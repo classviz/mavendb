@@ -25,7 +25,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <buildnumber-maven-plugin.version>3.3.0</buildnumber-maven-plugin.version><!-- https://mvnrepository.com/artifact/org.codehaus.mojo/buildnumber-maven-plugin -->
-        <checkstyle.version>13.1.0</checkstyle.version><!-- https://mvnrepository.com/artifact/com.puppycrawl.tools/checkstyle -->
+        <checkstyle.version>13.2.0</checkstyle.version><!-- https://mvnrepository.com/artifact/com.puppycrawl.tools/checkstyle -->
         <git-commit-id-maven-plugin.version>9.0.2</git-commit-id-maven-plugin.version><!-- https://mvnrepository.com/artifact/io.github.git-commit-id/git-commit-id-maven-plugin -->
         <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-assembly-plugin -->
         <maven-checkstyle-plugin.version>3.6.0</maven-checkstyle-plugin.version><!-- https://mvnrepository.com/artifact/org.apache.maven.plugins/maven-checkstyle-plugin -->
@@ -45,7 +45,7 @@
         <commons-lang3.version>3.20.0</commons-lang3.version><!-- https://mvnrepository.com/artifact/org.apache.commons/commons-lang3 -->
         <indexer-core.version>7.1.6</indexer-core.version><!-- https://mvnrepository.com/artifact/org.apache.maven.indexer/indexer-core -->
         <junit.version>6.0.2</junit.version><!-- https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter -->
-        <mongodb-driver-sync.version>5.6.2</mongodb-driver-sync.version><!-- https://mvnrepository.com/artifact/org.mongodb/mongodb-driver-sync -->
+        <mongodb-driver-sync.version>5.6.3</mongodb-driver-sync.version><!-- https://mvnrepository.com/artifact/org.mongodb/mongodb-driver-sync -->
         <mybatis.version>3.5.19</mybatis.version><!-- https://mvnrepository.com/artifact/org.mybatis/mybatis -->
         <mysql-connector-j.version>9.6.0</mysql-connector-j.version><!-- https://mvnrepository.com/artifact/com.mysql/mysql-connector-j -->
         <postgresql.version>42.7.9</postgresql.version><!-- https://mvnrepository.com/artifact/org.postgresql/postgresql -->

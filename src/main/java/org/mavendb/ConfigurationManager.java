@@ -27,19 +27,32 @@ class ConfigurationManager {
     private static final String CONFIG_MONGODB_URL = "org.mavendb.mongodb.url";
     private static final String CONFIG_MONGODB_BATCH_SIZE = "org.mavendb.mongodb.batch.size";
     private static final String CONFIG_THREAD_POOL_SIZE = "org.mavendb.thread.pool.size";
+    private static final String CONFIG_SQL_QUEUE_MAX_SIZE = "org.mavendb.sql.queue.max.size";
+    private static final String CONFIG_SQL_QUEUE_RESUME_SIZE = "org.mavendb.sql.queue.resume.size";
 
     /* ------- Configuration Defaults ------- */
     protected static final String DATABASE_NAME = "mavendb";
     protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/" + DATABASE_NAME;
     protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/" + DATABASE_NAME;
     protected static final String DEFAULT_SQLITE_URL = "jdbc:sqlite:" + DATABASE_NAME + ".db";
-    private static final int DEFAULT_MYSQL_BATCH_SIZE = 20000;
-    private static final int DEFAULT_PSQL_BATCH_SIZE = 20000;
-    private static final int DEFAULT_SQLITE_BATCH_SIZE = 20000;
+    private static final int DEFAULT_MYSQL_BATCH_SIZE = 50000;
+    private static final int DEFAULT_PSQL_BATCH_SIZE = 50000;
+    /**
+     * For SQLite, 100k and 50k has similar performance.
+     */
+    private static final int DEFAULT_SQLITE_BATCH_SIZE = 100000;
     private static final int DEFAULT_MONGODB_BATCH_SIZE = 20000;
     private static final int MIN_BATCH_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 100000;
     private static final int MIN_THREAD_POOL_SIZE = 2;
+    /**
+     * Default number of threads in the thread pool, set to 4 to provide good performance without overwhelming the database writting system.
+     */
+    private static final int DEFAULT_THREAD_POOL_SIZE = 4;
+    private static final int DEFAULT_SQL_QUEUE_MAX_SIZE = 16;
+    private static final int DEFAULT_SQL_QUEUE_RESUME_SIZE = 8;
+    private static final int MIN_QUEUE_SIZE = 4;
+    private static final int MAX_QUEUE_SIZE = 1000;
 
     private final Properties config;
 
@@ -51,6 +64,9 @@ class ConfigurationManager {
     private final int cachePsqlBatchSize;
     private final int cacheSqliteBatchSize;
     private final int cacheMongodbBatchSize;
+
+    private final int cacheSqlQueueMaxSize;
+    private final int cacheSqlQueueResumeSize;
 
 
     /**
@@ -116,6 +132,38 @@ class ConfigurationManager {
     }
 
     /**
+     * Parse and validate queue size from configuration with fallback to default.
+     *
+     * @param configKey Configuration property key
+     * @param defaultValue Default queue size if not configured
+     * @return Validated queue size
+     */
+    private int parseQueueSize(String configKey, int defaultValue) {
+        String queueSizeStr = config.getProperty(configKey);
+        if (queueSizeStr == null || queueSizeStr.isBlank()) {
+            LOG.log(Level.INFO, "{0} queue size not configured, using default: {1}",
+                    new Object[]{configKey, defaultValue});
+            return defaultValue;
+        }
+
+        try {
+            int queueSize = Integer.parseInt(queueSizeStr.trim());
+            if (queueSize < MIN_QUEUE_SIZE || queueSize > MAX_QUEUE_SIZE) {
+                LOG.log(Level.WARNING,
+                        "{0} queue size {1} is out of valid range [{2}, {3}], using default: {4}",
+                        new Object[]{configKey, queueSize, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE, defaultValue});
+                return defaultValue;
+            }
+            LOG.log(Level.INFO, "{0} queue size configured: {1}", new Object[]{configKey, queueSize});
+            return queueSize;
+        } catch (NumberFormatException e) {
+            LOG.log(Level.WARNING, "{0} queue size configuration invalid: {1}, using default: {2}",
+                    new Object[]{configKey, queueSizeStr, defaultValue});
+            return defaultValue;
+        }
+    }
+
+    /**
      * Constructor.
      *
      * @param config Properties object with configuration values (will be defensively copied)
@@ -131,6 +179,7 @@ class ConfigurationManager {
         mysqlConnectionProps.setProperty("allowPublicKeyRetrieval", "true");
         mysqlConnectionProps.setProperty("cachePrepStmts", "true");
         mysqlConnectionProps.setProperty("rewriteBatchedStatements", "true");
+        mysqlConnectionProps.setProperty("unique_checks", "0");
         mysqlConnectionProps.setProperty("useCompression", "true");
         mysqlConnectionProps.setProperty("useLocalSessionState", "true");
         mysqlConnectionProps.setProperty("useServerPrepStmts", "true");
@@ -142,20 +191,31 @@ class ConfigurationManager {
 
         // Initialize PSQL connection properties with defaults
         psqlConnectionProps.setProperty("ssl", "false");
+        psqlConnectionProps.setProperty("synchronous_commit", "off");  // Improve performance by disabling synchronous commit
+
         psqlConnectionProps.setProperty("user", this.getDatabaseUser(CONFIG_PSQL_USER));
         psqlConnectionProps.setProperty("password", this.getDatabasePassword(CONFIG_PSQL_PASSWORD));
 
         // Initialize SQLite connection properties with performance optimizations
-        // Enable WAL mode for better concurrency and performance with large datasets
-        sqliteConnectionProps.setProperty("journal_mode", "WAL");
-        // Use NORMAL synchronous mode for better performance (still safe with WAL)
-        sqliteConnectionProps.setProperty("synchronous", "NORMAL");
-        // Increase cache size to 64MB for better performance with large datasets
+        //
+        // 8GB (8589934592) slowdown the write performance significantly, so we use 
+        // 64MB (64000) and 640MB (64000) has the same performance
+        // So we use 64MB to save memory
         sqliteConnectionProps.setProperty("cache_size", "-64000");
-        // Set page size to 4KB for optimal performance
-        sqliteConnectionProps.setProperty("page_size", "4096");
-        // Enable memory-mapped I/O for faster reads (1GB)
+        // OFF mode is faster than WAL for single-writer scenarios, but can lead to database corruption on crashes, use with caution
+        sqliteConnectionProps.setProperty("journal_mode", "OFF");
+        // Enable memory-mapped I/O for faster reads - 1GB (1073741824) and 48GB (51539607552) has the same write performance, while create index is slower for 1GB 
         sqliteConnectionProps.setProperty("mmap_size", "1073741824");
+        //
+        // This is the most important setting for write performance: it controls the size of the database pages. 
+        // Larger page size can significantly improve write performance for large batch inserts, but it also increases memory usage and can lead to fragmentation. 
+        // 64KB is a good balance for our use case, as it provides much better performance than the default 4KB without excessive memory usage. 
+        // 
+        // Set page size to 64KB for optimal performance: it is faster than the default 4KB for data-refersh.sql: 479 vs 1,311 seconds as of Feb 2026
+        // Note: page size must be set before database creation, so it is not configurable at runtime.
+        sqliteConnectionProps.setProperty("page_size", "65536");
+        // Disable synchronous mode for faster writes (use with caution as it can lead to data loss on crashes)
+        sqliteConnectionProps.setProperty("synchronous", "OFF");
         // Increase temp store to memory for faster operations
         sqliteConnectionProps.setProperty("temp_store", "MEMORY");
 
@@ -164,6 +224,17 @@ class ConfigurationManager {
         this.cachePsqlBatchSize = parseBatchSize(CONFIG_PSQL_BATCH_SIZE, DEFAULT_PSQL_BATCH_SIZE);
         this.cacheSqliteBatchSize = parseBatchSize(CONFIG_SQLITE_BATCH_SIZE, DEFAULT_SQLITE_BATCH_SIZE);
         this.cacheMongodbBatchSize = parseBatchSize(CONFIG_MONGODB_BATCH_SIZE, DEFAULT_MONGODB_BATCH_SIZE);
+
+        // Thread pool queue sizes
+        this.cacheSqlQueueMaxSize = parseQueueSize(CONFIG_SQL_QUEUE_MAX_SIZE, DEFAULT_SQL_QUEUE_MAX_SIZE);
+        int resumeSize = parseQueueSize(CONFIG_SQL_QUEUE_RESUME_SIZE, DEFAULT_SQL_QUEUE_RESUME_SIZE);
+        if (resumeSize > this.cacheSqlQueueMaxSize) {
+            LOG.log(Level.WARNING,
+                "SQL queue resume size {0} exceeds max size {1}, using max size",
+                new Object[]{resumeSize, this.cacheSqlQueueMaxSize});
+            resumeSize = this.cacheSqlQueueMaxSize;
+        }
+        this.cacheSqlQueueResumeSize = resumeSize;
    }
 
 
@@ -173,7 +244,7 @@ class ConfigurationManager {
      * @return Validated thread pool size
      */
     public int parseThreadPoolSize() {
-        String threadPoolStr = config.getProperty(CONFIG_THREAD_POOL_SIZE);
+        String threadPoolStr = config.getProperty(CONFIG_THREAD_POOL_SIZE, String.valueOf(DEFAULT_THREAD_POOL_SIZE));
         if (threadPoolStr == null || threadPoolStr.isBlank()) {
             int defaultPoolSize = Runtime.getRuntime().availableProcessors();
             defaultPoolSize = Math.max(MIN_THREAD_POOL_SIZE, defaultPoolSize);
@@ -271,5 +342,23 @@ class ConfigurationManager {
      */
     public int getMongodbBatchSize() {
         return this.cacheMongodbBatchSize;
+    }
+
+    /**
+     * Get SQL store queue max size from configuration.
+     *
+     * @return SQL queue max size
+     */
+    public int getSqlQueueMaxSize() {
+        return this.cacheSqlQueueMaxSize;
+    }
+
+    /**
+     * Get SQL store queue resume size from configuration.
+     *
+     * @return SQL queue resume size
+     */
+    public int getSqlQueueResumeSize() {
+        return this.cacheSqlQueueResumeSize;
     }
 }

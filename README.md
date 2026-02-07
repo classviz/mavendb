@@ -109,9 +109,10 @@ How to Run the Tool
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
-| Jan 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,097,334` + `1,980,766`
-| Jan 2026 |    `89,587,849`  |  `1.0` hour | PSQL    | `2,691,373` + `882,647`
-| Jan 2026 |    `89,587,849`  | `26.6` min  | Mongodb | `1,169,402` + `428,064`
+| Feb 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,061,407` + `1,980,766`, 50k batch
+| Feb 2026 |    `89,587,849`  |   `37` min  | PSQL    | `1,347,975` + `882,647`, 50k batch
+| Feb 2026 |    `89,587,849`  | `26.6` min  | Mongodb | `1,169,402` + `428,064`
+| Feb 2026 |    `89,587,849`  | `40.2` min  | SQLite  | `1,317,668` + `479,457`, 50k batch
 
 
 ## Access
@@ -136,16 +137,8 @@ Access via REST API
   - `artifact_id`: `commons-lang3`
 
 
-### PSQL
+Access via Docker Shell
 
-Access via DB Adminer: [http://localhost:10192/](http://localhost:10192/)
-- Username: `root`
-- Password: use the password in [.env](.env) file
-
-
-### MySQL Docker Shell
-
-MySQL Docker Container
 - Come into Container
 ```
 host $ sudo docker compose exec -it mavendb-mysql bash
@@ -156,46 +149,12 @@ host $ sudo docker compose exec -it mavendb-mysql bash
 container bash-5.1# mysql -p
 ```
 
-- Dump table, which need seeral minutes
-  - [export.sql for sqlite](src/main/resources/db/sqlite/export.sql)
-  - `name` colum may have `new line` character, we replace it with `space`
-  - `description` column is skipped for now
 
-```
-container bash-5.1# pwd && ls -alh
-/var/lib/mysql-files
-total 26G
+### PSQL
 
--rw-r----- 1 mysql mysql 9.3M Jul 31 2025 23:48 g.csv
--rw-r----- 1 mysql mysql  50M Jul 31 2025 23:49 ga.csv
--rw-r----- 1 mysql mysql  26G Jul 31 2025 23:56 gav.csv
-```
-
-Copy files out
-```
-host $ sudo docker cp mavendb-mysql:/var/lib/mysql-files/ dist
-```
-
-Import to sqlite
-
-- Init
-```
-sqlite3 mavendb.sqlite
-.read create.sql
-```
-
-- Import
-```
-.mode csv
-.import g.csv g
-.import ga.csv ga
-.import gav.csv gav
-```
-
-- Index
-```
-.read index.sql
-```
+Access via DB Adminer: [http://localhost:10192/](http://localhost:10192/)
+- Username: `root`
+- Password: use the password in [.env](.env) file
 
 
 ## Internal Only
@@ -220,6 +179,78 @@ Maven Settings
 Publish site
 * `mvn clean site site:stage scm-publish:publish-scm`
 
+
+### Commands
+
+docker exec -i mavendb-mysql mysql -u <username> -p<password> < /path/to/your/script.sql
+
+Restart
+
+```sh
+sudo docker compose -f compose-mysql.yml   restart
+sudo docker compose -f compose-mongodb.yml restart
+sudo docker compose -f compose-psql.yml    restart
+```
+
+MySQL
+
+```sh
+sudo apt install mysql-client
+
+# Backup and Restore DB
+mysqldump --host=127.0.0.1 --port=3306 -u mavendbadmin -p mavendb | gzip > mavendb-mysql.sql.gz
+```
+
+
+PSQL
+
+```sh
+# We need the pg client
+sudo apt install postgresql-client
+
+# Sample query
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "SELECT * FROM mavendb.g limit 10"
+
+# Export tables to CSV
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.g)     TO 'g.csv'   WITH (FORMAT CSV, HEADER);"
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.ga)    TO 'ga.csv'  WITH (FORMAT CSV, HEADER);"
+PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.v_gav) TO 'gav.csv' WITH (FORMAT CSV, HEADER);"
+
+# Backup and Restore DB
+pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
+psql -f mavendb-psql.sql postgres
+```
+
+### Max Lengths
+
+Max length of the text fields of maven central repository.
+
+```
+sha1=106
+
+groupId=129
+artifactId=98
+version=118
+classifier=67
+packaging=113
+fileExtension=113
+name=486
+description=53217
+
+Bundle-Description=2503
+Bundle-DocURL=221
+Bundle-License=463
+Bundle-Name=155
+Bundle-SymbolicName=179
+Bundle-Version=122
+
+Export-Package=1247534
+Export-Service=3529
+Import-Package=87015
+Require-Bundle=3245
+
+repositoryId=7
+```
 
 ### Sample Data
 
@@ -287,46 +318,16 @@ Key{name='hasSignature', type=Boolean}=true, name=hasSignature, type=Boolean
 Key{name='fileModified', type=Long}=1692943727000, name=fileModified, type=Long
 ```
 
-### Commands
-
-docker exec -i mavendb-mysql mysql -u <username> -p<password> < /path/to/your/script.sql
-
-Restart
-
-```sh
-sudo docker compose -f compose-mysql.yml   restart
-sudo docker compose -f compose-mongodb.yml restart
-sudo docker compose -f compose-psql.yml    restart
-```
-
-MySQL
-
-```sh
-# Export tables to CSV
-mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM g"     | sed 's/\t/,/g' > g.csv
-mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM ga"    | sed 's/\t/,/g' > ga.csv
-mysql --host=127.0.0.1 --port=3306 -u mavendbadmin -p --database=mavendb --batch --raw --quick -e "SELECT * FROM v_gav" | sed 's/\t/,/g' > gav.csv
-
-# Backup and Restore DB
-mysqldump --host=127.0.0.1 --port=3306 -u mavendbadmin -p mavendb | gzip > mavendb-mysql.sql.gz
-```
-
-
-PSQL
-
-```sh
-# We need the pg client
-sudo apt install postgresql-client
-
-# Sample query
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "SELECT * FROM mavendb.g limit 10"
-
-# Export tables to CSV
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.g)     TO 'g.csv'   WITH (FORMAT CSV, HEADER);"
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.ga)    TO 'ga.csv'  WITH (FORMAT CSV, HEADER);"
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.v_gav) TO 'gav.csv' WITH (FORMAT CSV, HEADER);"
-
-# Backup and Restore DB
-pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
-psql -f mavendb-psql.sql postgres
+```json
+{
+  "_id": 13535,
+  "Bundle-Description": "JaCoCo Core",
+  "Bundle-DocURL": "https://www.absa.africa",
+  "Bundle-License": "https://www.eclipse.org/legal/epl-2.0/",
+  "Bundle-Name": "JaCoCo Core",
+  "Bundle-SymbolicName": "za.co.absa.jacoco.org.jacoco.core",
+  "Bundle-Version": "0.8.10.202305020106",
+  "Export-Package": "org.jacoco.core.internal;x-internal:=true;version=\"0.8.10\",org.jacoco.core.internal.analysis;x-internal:=true;version=\"0.8.10\";uses:=\"org.jacoco.core.analysis,org.jacoco.core.internal.analysis.filter,org.jacoco.core.internal.flow,org.objectweb.asm,org.objectweb.asm.tree\",org.jacoco.core.internal.analysis.filter;x-internal:=true;version=\"0.8.10\";uses:=\"org.objectweb.asm.tree\",org.jacoco.core.internal.data;x-internal:=true;version=\"0.8.10\",org.jacoco.core.internal.flow;x-internal:=true;version=\"0.8.10\";uses:=\"org.jacoco.core.internal.analysis,org.objectweb.asm,org.objectweb.asm.commons,org.objectweb.asm.tree\",org.jacoco.core.internal.instr;x-internal:=true;version=\"0.8.10\";uses:=\"org.jacoco.core.internal.flow,org.jacoco.core.runtime,org.objectweb.asm\",org.jacoco.core;version=\"0.8.10\",org.jacoco.core.analysis;version=\"0.8.10\";uses:=\"org.jacoco.core.data,org.jacoco.core.internal.analysis\",org.jacoco.core.data;version=\"0.8.10\";uses:=\"org.jacoco.core.internal.data\",org.jacoco.core.instr;version=\"0.8.10\";uses:=\"org.jacoco.core.runtime\",org.jacoco.core.runtime;version=\"0.8.10\";uses:=\"org.jacoco.core.data,org.objectweb.asm\",org.jacoco.core.tools;version=\"0.8.10\";uses:=\"org.jacoco.core.data",
+  "Import-Package": "org.jacoco.core;version=\"[0.8.10,0.8.11)\",org.jacoco.core.analysis;version=\"[0.8.10,0.8.11)\",org.jacoco.core.data;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal.analysis;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal.analysis.filter;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal.data;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal.flow;version=\"[0.8.10,0.8.11)\",org.jacoco.core.internal.instr;version=\"[0.8.10,0.8.11)\",org.jacoco.core.runtime;version=\"[0.8.10,0.8.11)\",org.objectweb.asm;version=\"[9.5.0,9.6)\",org.objectweb.asm.commons;version=\"[9.5.0,9.6)\",org.objectweb.asm.tree;version=\"[9.5.0,9.6)"
+}
 ```

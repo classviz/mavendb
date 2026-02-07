@@ -1,6 +1,5 @@
 package org.mavendb;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -10,14 +9,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.index.reader.ChunkReader;
 import org.apache.maven.index.reader.IndexReader;
+import org.apache.maven.index.reader.Record;
 import org.apache.maven.index.reader.RecordExpander;
 import org.apache.maven.index.reader.ResourceHandler;
 import org.apache.maven.index.reader.WritableResourceHandler;
@@ -52,12 +55,6 @@ class MvnScanner {
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_600_SECONDS = 600;
     private static final int EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
-    /* ------- Queue Management ------- */
-    private static final int SQL_QUEUE_MAX_SIZE = 64;
-    private static final int SQL_QUEUE_RESUME_SIZE = 32;
-    private static final int MONGODB_QUEUE_MAX_SIZE = 40;
-    private static final int MONGODB_QUEUE_RESUME_SIZE = 10;
-
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
 
@@ -91,6 +88,9 @@ class MvnScanner {
     /**
      * Virtual thread executor for asynchronous store operations.
      * Uses Java virtual threads (Project Loom) with configurable concurrency limit.
+     *
+     * @see {@link ConfigurationManager#getSqlQueueMaxSize()}
+     * @see {@link ConfigurationManager#getSqlQueueResumeSize()}
      */
     private ThreadPoolExecutor storeExecutor;
 
@@ -98,6 +98,12 @@ class MvnScanner {
      * JSON Documents to be saved to DB.
      */
     private List<Document> dataToBeStored = new ArrayList<>();
+
+
+    /**
+     * Track the max length of string values for each key for logging and potential future optimizations.
+     */
+    private Map<String, Integer> maxLengthTracker = new ConcurrentSkipListMap<>();
 
     /**
      * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
@@ -172,13 +178,22 @@ class MvnScanner {
     public void perform(Properties config) throws IOException, SQLException {
         this.configMgr = new ConfigurationManager(config);
 
+        int executorCoreThreads, maxConcurrentThreads;
+        if (this.dbType == DatabaseType.SQLITE) {
+            LOG.log(Level.INFO, "SQLite only allows one writer, cannot write in multiple threads");
+            executorCoreThreads = 1;
+            maxConcurrentThreads = 1;
+        } else {
+            executorCoreThreads = EXECUTOR_CORE_THREADS;
+            maxConcurrentThreads = configMgr.parseThreadPoolSize();
+        }
+
         // Load max concurrent threads configuration
-        int maxConcurrentThreads = configMgr.parseThreadPoolSize();
-        LOG.log(Level.INFO, "Virtual thread pool size configured: {0}", maxConcurrentThreads);
+        LOG.log(Level.INFO, "Virtual thread pool size configured: core threads {0}, max threads {1}", new Object[]{executorCoreThreads, maxConcurrentThreads});
 
         // Create bounded virtual thread executor with configured concurrency limit
         this.storeExecutor = new ThreadPoolExecutor(
-            EXECUTOR_CORE_THREADS,
+            executorCoreThreads,
             maxConcurrentThreads,
             EXECUTOR_KEEP_ALIVE_SECONDS,
             TimeUnit.SECONDS,
@@ -212,6 +227,11 @@ class MvnScanner {
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.databaseRepository.createIndexesMongoDB(this.indexId);
         }
+
+        LOG.log(Level.INFO, "Max length of the String fields: {0}{1}", new Object[] {System.lineSeparator(),
+                this.maxLengthTracker.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining(System.lineSeparator()))});
     }
 
     /**
@@ -296,11 +316,17 @@ class MvnScanner {
                     Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, recordSeq);
                     record.getExpanded().forEach((k, v) -> {
                         if (k.getProto().equals(String.class)) {
-                            jsonDoc.append(k.getName(), record.getString(k));
+                            String value = strip(record.getString(k));
+                            jsonDoc.append(k.getName(), value);
+
+                            // Track the maximum length of string values for each key for logging and potential future optimizations
+                            if (value != null) {
+                                maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
+                            }
                         } else if (k.getProto().equals(String[].class)) {
                             List<String> stringList = new ArrayList<>();
                             for (String s : record.getStringArray(k)) {
-                                stringList.add(s);
+                                stringList.add(strip(s));
                             }
                             jsonDoc.append(k.getName(), stringList);
                         } else if (k.getProto().equals(Long.class)) {
@@ -312,7 +338,8 @@ class MvnScanner {
                         }
                     });
 
-                    String versionString = record.getString(org.apache.maven.index.reader.Record.VERSION);
+                    // Parse version
+                    String versionString = record.getString(Record.VERSION);
                     if (versionString == null || versionString.isBlank()) {
                         LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
                         continue;
@@ -320,6 +347,17 @@ class MvnScanner {
                     VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
                     jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.getMajorVersion());
                     jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.getVersionSeq());
+
+                    // Calculate file name
+                    String classifier = record.getString(Record.CLASSIFIER);
+                    String artifactId = record.getString(Record.ARTIFACT_ID);
+                    String artifactVersion = record.getString(Record.VERSION);
+                    String fileExtension = record.getString(Record.FILE_EXTENSION);
+
+                    String fileName = (classifier == null || classifier.isEmpty())
+                            ? artifactId + "-" + artifactVersion + "." + fileExtension
+                            : artifactId + "-" + artifactVersion + "-" + classifier + "." + fileExtension;
+                    jsonDoc.append(DatabaseRepository.JSON_FIELD_FILE_NAME, fileName);
 
                     this.dataToBeStored.add(jsonDoc);
                     this.store(false, recordSeq);
@@ -340,8 +378,9 @@ class MvnScanner {
         if (this.storeExecutor.getQueue().size() > maxQueueSize) {
             LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
             while (this.storeExecutor.getQueue().size() > resumeQueueSize) {
+                LOG.info("Current thread queue size is " + this.storeExecutor.getQueue().size());
                 try {
-                    Thread.sleep(100);
+                    Thread.sleep(200);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -375,11 +414,7 @@ class MvnScanner {
             // Save batchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.dataToBeStored.size() >= batchSize || force) {
-                // The maxQueueSize will decide the memory usage
-                // Example:
-                //   256 ~= 15 GB memory usage
-                //   128 ~= 7.8 GB memory usage
-                this.avoidOverload(SQL_QUEUE_MAX_SIZE, SQL_QUEUE_RESUME_SIZE);
+                this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
 
                 // Submit store operation to virtual thread for asynchronous execution.
                 List<Document> docsToStore = List.copyOf(this.dataToBeStored);
@@ -394,7 +429,7 @@ class MvnScanner {
             // Save mongodbBatchSize records as a group,
             // Or when force save, save it no matter of the size
             if (this.dataToBeStored.size() >= this.configMgr.getMongodbBatchSize() || force) {
-                this.avoidOverload(MONGODB_QUEUE_MAX_SIZE, MONGODB_QUEUE_RESUME_SIZE);
+                this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
 
                 List<Document> docsToStore = List.copyOf(this.dataToBeStored);
                 this.storeExecutor.submit(() -> {
@@ -405,5 +440,13 @@ class MvnScanner {
                 this.dataToBeStored.clear();
             }
         }
+    }
+
+
+    /**
+     * Strip leading/trailing whitespace and double quotes from input string.
+     */
+    private String strip(String input) {
+        return StringUtils.strip(StringUtils.stripToNull(input), "\"");
     }
 }

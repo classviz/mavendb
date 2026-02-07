@@ -23,8 +23,8 @@ import com.mongodb.client.model.InsertManyOptions;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.jdbc.ScriptRunner;
+import org.apache.maven.index.reader.Record;
 import org.bson.Document;
 import org.mavendb.Main.DatabaseType;
 import org.postgresql.util.PGobject;
@@ -39,6 +39,7 @@ class DatabaseRepository {
     private static final Logger LOG = Logger.getLogger(DatabaseRepository.class.getName());
 
     protected static final String JSON_FIELD_ID = "_id";
+    protected static final String JSON_FIELD_FILE_NAME = "fileName";
 
     protected static final List<DatabaseType> SUPPORTED_SQL_DB_TYPES = List.of(
         DatabaseType.MYSQL,
@@ -63,9 +64,20 @@ class DatabaseRepository {
     private static final int SQL_IDX_CLASSIFIER = 14;
     private static final int SQL_IDX_PACKAGING = 15;
     private static final int SQL_IDX_FILE_EXTENSION = 16;
-    private static final int SQL_IDX_NAME = 17;
-    private static final int SQL_IDX_DESCRIPTION = 18;
-    private static final int SQL_IDX_JSON = 19;
+    private static final int SQL_IDX_FILE_NAME = 17;
+    private static final int SQL_IDX_NAME = 18;
+    private static final int SQL_IDX_DESCRIPTION = 19;
+    private static final int SQL_IDX_BUNDLE_DESCRIPTION = 20;
+    private static final int SQL_IDX_BUNDLE_DOCURL = 21;
+    private static final int SQL_IDX_BUNDLE_LICENSE = 22;
+    private static final int SQL_IDX_BUNDLE_NAME = 23;
+    private static final int SQL_IDX_BUNDLE_SYMBOLICNAME = 24;
+    private static final int SQL_IDX_BUNDLE_VERSION = 25;
+    private static final int SQL_IDX_EXPORT_PACKAGE = 26;
+    private static final int SQL_IDX_IMPORT_PACKAGE = 27;
+    private static final int SQL_IDX_REQUIRE_BUNDLE = 28;
+    private static final int SQL_IDX_EXPORT_SERVICE = 29;
+    private static final int SQL_IDX_JSON = 30;
 
     private static final int SHA1_MAX_LENGTH = 40;
 
@@ -143,7 +155,12 @@ class DatabaseRepository {
                     sha1,
                     group_id, artifact_id, artifact_version,
                     classifier, packaging, file_extension,
+                    file_name,
                     name, description,
+                    bundle_description, bundle_docurl, bundle_license,
+                    bundle_name, bundle_symbolicname, bundle_version,
+                    export_package, import_package,
+                    require_bundle, export_service,
                     json
                 ) VALUES (
                     ?,
@@ -153,6 +170,11 @@ class DatabaseRepository {
                     ?,
                     ?, ?, ?,
                     ?, ?, ?,
+                    ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
                     ?, ?,
                     ?
                 )
@@ -186,49 +208,82 @@ class DatabaseRepository {
         pstmt.setLong(SQL_IDX_SEQID, record.getLong(JSON_FIELD_ID));
 
         pstmt.setInt(SQL_IDX_MAJOR_VERSION, record.getInteger(VersionAnalyser.KEY_MAJOR_VERSION));
+        record.remove(VersionAnalyser.KEY_MAJOR_VERSION);
         pstmt.setLong(SQL_IDX_VERSION_SEQ, record.getLong(VersionAnalyser.KEY_VERSION_SEQ));
+        record.remove(VersionAnalyser.KEY_VERSION_SEQ);
 
-        pstmt.setObject(SQL_IDX_RECORD_MODIFIED, record.getLong("recordModified"));
-        record.remove("recordModified");
-        pstmt.setObject(SQL_IDX_FILE_MODIFIED, record.getLong("fileModified"));
-        record.remove("fileModified");
-        pstmt.setObject(SQL_IDX_FILE_SIZE, record.getLong("fileSize"));
-        record.remove("fileSize");
+        pstmt.setObject(SQL_IDX_RECORD_MODIFIED, record.getLong(Record.REC_MODIFIED.getName()));
+        record.remove(Record.REC_MODIFIED.getName());
+        pstmt.setObject(SQL_IDX_FILE_MODIFIED, record.getLong(Record.FILE_MODIFIED.getName()));
+        record.remove(Record.FILE_MODIFIED.getName());
+        pstmt.setObject(SQL_IDX_FILE_SIZE, record.getLong(Record.FILE_SIZE.getName()));
+        record.remove(Record.FILE_SIZE.getName());
 
-        pstmt.setBoolean(SQL_IDX_HAS_SIGNATURE, record.getBoolean("hasSignature"));
-        record.remove("hasSignature");
-        pstmt.setBoolean(SQL_IDX_HAS_SOURCES, record.getBoolean("hasSources"));
-        record.remove("hasSources");
-        pstmt.setBoolean(SQL_IDX_HAS_JAVADOC, record.getBoolean("hasJavadoc"));
-        record.remove("hasJavadoc");
+        pstmt.setBoolean(SQL_IDX_HAS_SIGNATURE, record.getBoolean(Record.HAS_SIGNATURE.getName()));
+        record.remove(Record.HAS_SIGNATURE.getName());
+        pstmt.setBoolean(SQL_IDX_HAS_SOURCES, record.getBoolean(Record.HAS_SOURCES.getName()));
+        record.remove(Record.HAS_SOURCES.getName());
+        pstmt.setBoolean(SQL_IDX_HAS_JAVADOC, record.getBoolean(Record.HAS_JAVADOC.getName()));
+        record.remove(Record.HAS_JAVADOC.getName());
 
-        // Shrink SHA1 field to maximum length of 40 if needed
-        String sha1Value = strip(record.getString("sha1"));
-        if (sha1Value != null && sha1Value.length() > SHA1_MAX_LENGTH) {
-            sha1Value = sha1Value.substring(0, SHA1_MAX_LENGTH);
-            LOG.warning("SHA1 value truncated to 40 characters: " + sha1Value + " for record " + record);
+        // Do not store SHA1 field if it exceeds maximum length of 40
+        String sha1Value = record.getString(Record.SHA1.getName());
+        if (sha1Value == null) {
+            pstmt.setString(SQL_IDX_SHA1, null);
+        } else if (sha1Value.length() <= SHA1_MAX_LENGTH) {
+            pstmt.setString(SQL_IDX_SHA1, sha1Value);
+            record.remove(Record.SHA1.getName());
+        } else {
+            pstmt.setString(SQL_IDX_SHA1, null);
+            LOG.warning("SHA1 value is null or exceeds 40 characters and will be set to null for record " + record);
         }
-        pstmt.setString(SQL_IDX_SHA1, sha1Value);
-        record.remove("sha1");
 
-        pstmt.setString(SQL_IDX_GROUP_ID, strip(record.getString("groupId")));
-        record.remove("groupId");
-        pstmt.setString(SQL_IDX_ARTIFACT_ID, strip(record.getString("artifactId")));
-        record.remove("artifactId");
-        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, strip(record.getString("version")));
-        record.remove("version");
+        pstmt.setString(SQL_IDX_GROUP_ID, record.getString(Record.GROUP_ID.getName()));
+        record.remove(Record.GROUP_ID.getName());
+        String artifactId = record.getString(Record.ARTIFACT_ID.getName());
+        pstmt.setString(SQL_IDX_ARTIFACT_ID, artifactId);
+        record.remove(Record.ARTIFACT_ID.getName());
+        String artifactVersion = record.getString(Record.VERSION.getName());
+        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, artifactVersion);
+        record.remove(Record.VERSION.getName());
 
-        pstmt.setString(SQL_IDX_CLASSIFIER, strip(record.getString("classifier")));
-        record.remove("classifier");
-        pstmt.setString(SQL_IDX_PACKAGING, strip(record.getString("packaging")));
-        record.remove("packaging");
-        pstmt.setString(SQL_IDX_FILE_EXTENSION, strip(record.getString("fileExtension")));
-        record.remove("fileExtension");
+        String classifier = record.getString(Record.CLASSIFIER.getName());
+        pstmt.setString(SQL_IDX_CLASSIFIER, classifier);
+        record.remove(Record.CLASSIFIER.getName());
+        pstmt.setString(SQL_IDX_PACKAGING, record.getString(Record.PACKAGING.getName()));
+        record.remove(Record.PACKAGING.getName());
+        String fileExtension = record.getString(Record.FILE_EXTENSION.getName());
+        pstmt.setString(SQL_IDX_FILE_EXTENSION, fileExtension);
+        record.remove(Record.FILE_EXTENSION.getName());
 
-        pstmt.setString(SQL_IDX_NAME, strip(record.getString("name")));
-        record.remove("name");
-        pstmt.setString(SQL_IDX_DESCRIPTION, strip(record.getString("description")));
-        record.remove("description");
+        pstmt.setString(SQL_IDX_FILE_NAME, record.getString(JSON_FIELD_FILE_NAME));
+        record.remove(JSON_FIELD_FILE_NAME);
+
+        pstmt.setString(SQL_IDX_NAME, record.getString(Record.NAME.getName()));
+        record.remove(Record.NAME.getName());
+        pstmt.setString(SQL_IDX_DESCRIPTION, record.getString(Record.DESCRIPTION.getName()));
+        record.remove(Record.DESCRIPTION.getName());
+
+        pstmt.setString(SQL_IDX_BUNDLE_DESCRIPTION, record.getString(Record.OSGI_BUNDLE_DESCRIPTION.getName()));
+        record.remove(Record.OSGI_BUNDLE_DESCRIPTION.getName());
+        pstmt.setString(SQL_IDX_BUNDLE_DOCURL, record.getString(Record.OSGI_EXPORT_DOCURL.getName()));
+        record.remove(Record.OSGI_EXPORT_DOCURL.getName());
+        pstmt.setString(SQL_IDX_BUNDLE_LICENSE, record.getString(Record.OSGI_BUNDLE_LICENSE.getName()));
+        record.remove(Record.OSGI_BUNDLE_LICENSE.getName());
+        pstmt.setString(SQL_IDX_BUNDLE_NAME, record.getString(Record.OSGI_BUNDLE_NAME.getName()));
+        record.remove(Record.OSGI_BUNDLE_NAME.getName());
+        pstmt.setString(SQL_IDX_BUNDLE_SYMBOLICNAME, record.getString(Record.OSGI_BUNDLE_SYMBOLIC_NAME.getName()));
+        record.remove(Record.OSGI_BUNDLE_SYMBOLIC_NAME.getName());
+        pstmt.setString(SQL_IDX_BUNDLE_VERSION, record.getString(Record.OSGI_BUNDLE_VERSION.getName()));
+        record.remove(Record.OSGI_BUNDLE_VERSION.getName());
+        pstmt.setString(SQL_IDX_EXPORT_PACKAGE, record.getString(Record.OSGI_EXPORT_PACKAGE.getName()));
+        record.remove(Record.OSGI_EXPORT_PACKAGE.getName());
+        pstmt.setString(SQL_IDX_IMPORT_PACKAGE, record.getString(Record.OSGI_IMPORT_PACKAGE.getName()));
+        record.remove(Record.OSGI_IMPORT_PACKAGE.getName());
+        pstmt.setString(SQL_IDX_REQUIRE_BUNDLE, record.getString(Record.OSGI_REQUIRE_BUNDLE.getName()));
+        record.remove(Record.OSGI_REQUIRE_BUNDLE.getName());
+        pstmt.setString(SQL_IDX_EXPORT_SERVICE, record.getString(Record.OSGI_EXPORT_SERVICE.getName()));
+        record.remove(Record.OSGI_EXPORT_SERVICE.getName());
 
         // Remove _id from json if it's the only field left
         if (record.size() == 1) {
@@ -262,13 +317,6 @@ class DatabaseRepository {
     }
 
     /**
-     * Strip leading/trailing whitespace and double quotes from input string.
-     */
-    private String strip(String input) {
-        return StringUtils.strip(StringUtils.stripToNull(input), "\"");
-    }
-
-    /**
      * Store MongoDB documents to database.
      *
      * @param storeDocuments Documents to persist
@@ -291,11 +339,11 @@ class DatabaseRepository {
         long start = System.currentTimeMillis();
         try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
             mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
-                Indexes.ascending("groupId"),
-                Indexes.ascending("artifactId"),
-                Indexes.ascending("version"),
-                Indexes.ascending("versionSeq"),
-                Indexes.ascending("majorVersion")
+                Indexes.ascending(Record.GROUP_ID.getName()),
+                Indexes.ascending(Record.ARTIFACT_ID.getName()),
+                Indexes.ascending(Record.VERSION.getName()),
+                Indexes.ascending(VersionAnalyser.KEY_VERSION_SEQ),
+                Indexes.ascending(VersionAnalyser.KEY_MAJOR_VERSION)
             ));
         }
         LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});

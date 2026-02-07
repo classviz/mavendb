@@ -17,15 +17,19 @@ services:
       - ${PSQL_PORT}:5432
     command: >
       postgres 
-      -c shared_buffers=32GB
-      -c effective_cache_size=96GB
-      -c work_mem=256MB
-      -c maintenance_work_mem=8GB
-      -c min_wal_size=4GB
-      -c max_wal_size=16GB
       -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
+      -c checkpoint_timeout=30min
+      -c fsync=off
+      -c full_page_writes=off
+      -c effective_cache_size=96GB
+      -c maintenance_work_mem=8GB
+      -c max_wal_size=64GB
+      -c min_wal_size=8GB
       -c random_page_cost=1.1
+      -c shared_buffers=32GB
+      -c synchronous_commit=off
+      -c wal_buffers=128MB
+      -c work_mem=64MB
     shm_size: 16gb
     networks:
       - psqlnet

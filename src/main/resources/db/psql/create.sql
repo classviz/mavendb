@@ -8,11 +8,14 @@ SET search_path TO mavendb;
 
 -- ============================================================
 -- TABLE: gav
+--
+-- Use UNLOGGED tables for huge speed boost on write operations
+-- at the cost of durability in case of a crash.
 -- ============================================================
 
 DROP TABLE IF EXISTS gav CASCADE;
 
-CREATE TABLE gav (
+CREATE UNLOGGED TABLE gav (
     seqid               bigint NOT NULL,
 
     major_version       int,
@@ -28,28 +31,30 @@ CREATE TABLE gav (
 
     sha1                char(40),
 
-    group_id            varchar(254) NOT NULL,
-    artifact_id         varchar(254) NOT NULL,
+    group_id            varchar(256) NOT NULL,
+    artifact_id         varchar(256) NOT NULL,
     artifact_version    varchar(128) NOT NULL,
 
     classifier          varchar(128),
-    packaging           varchar(254),
-    file_extension      varchar(254),
-
-    -- PSQL generated column (stored)
-    file_name varchar(512) GENERATED ALWAYS AS (
-        left(
-            CASE
-                WHEN classifier IS NULL THEN
-                    artifact_id || '-' || artifact_version || '.' || file_extension
-                ELSE
-                    artifact_id || '-' || artifact_version || '-' || classifier || '.' || file_extension
-            END,
-            512
-        )
-    ) STORED,
+    packaging           varchar(256),
+    file_extension      varchar(256),
+    file_name           varchar(256),
 
     name                varchar(1024),
+
+    bundle_description  varchar(4096),
+    bundle_docurl       varchar(512),
+    bundle_license      varchar(1024),
+    bundle_name         varchar(512),
+    bundle_symbolicname varchar(512),
+    bundle_version      varchar(256),
+
+    require_bundle      varchar(8196),
+    export_service      varchar(8196),
+
+    export_package      text,
+    import_package      text,
+
     description         text,
 
     json                jsonb
@@ -62,8 +67,8 @@ CREATE TABLE gav (
 
 DROP TABLE IF EXISTS g;
 
-CREATE TABLE g (
-    group_id                    varchar(254) PRIMARY KEY,
+CREATE UNLOGGED TABLE g (
+    group_id                    varchar(256) PRIMARY KEY,
 
     artifact_version_counter    int,
     major_version_counter       int,
@@ -71,9 +76,9 @@ CREATE TABLE g (
     file_modified_max           bigint,
 
     group_id_left1 varchar(128) GENERATED ALWAYS AS (split_part(group_id, '.', 1)) STORED,
-    group_id_left2 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 2)) STORED,
-    group_id_left3 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 3)) STORED,
-    group_id_left4 varchar(254) GENERATED ALWAYS AS (split_part(group_id, '.', 4)) STORED
+    group_id_left2 varchar(256) GENERATED ALWAYS AS (split_part(group_id, '.', 2)) STORED,
+    group_id_left3 varchar(256) GENERATED ALWAYS AS (split_part(group_id, '.', 3)) STORED,
+    group_id_left4 varchar(256) GENERATED ALWAYS AS (split_part(group_id, '.', 4)) STORED
 );
 
 -- ============================================================
@@ -82,9 +87,9 @@ CREATE TABLE g (
 
 DROP TABLE IF EXISTS ga;
 
-CREATE TABLE ga (
-    group_id                varchar(254) NOT NULL,
-    artifact_id             varchar(254) NOT NULL,
+CREATE UNLOGGED TABLE ga (
+    group_id                varchar(256) NOT NULL,
+    artifact_id             varchar(256) NOT NULL,
 
     artifact_version_counter    int,
     major_version_counter       int,

@@ -23,6 +23,7 @@ WHERE group_id       = 'org.apache.tomcat'
   AND artifact_id    = 'tomcat'
   AND file_extension = 'zip.sha512'
 ;
+
 select concat(now(), ' Table gav Fix org.apache.tomcat/tomcat/zip.sha512 finished');
 
 

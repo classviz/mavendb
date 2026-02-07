@@ -43,8 +43,21 @@ CREATE TABLE gav (
   packaging                 TEXT,
   file_extension            TEXT,
 
+  file_name                 TEXT,
+
   name                      TEXT,
   description               TEXT,
+
+  bundle_description        TEXT,
+  bundle_docurl             TEXT,
+  bundle_license            TEXT,
+  bundle_name               TEXT,
+  bundle_symbolicname       TEXT,
+  bundle_version            TEXT,
+  export_package            TEXT,
+  import_package            TEXT,
+  require_bundle            TEXT,
+  export_service            TEXT,
 
   json                      TEXT
 );

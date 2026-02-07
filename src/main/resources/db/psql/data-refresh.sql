@@ -6,11 +6,8 @@ SET search_path TO mavendb;
 
 SELECT now() || ' Started' AS status;
 
-CREATE INDEX index_gav
-    ON gav (group_id, artifact_id, artifact_version);
-
-CREATE INDEX index_fname
-    ON gav (file_name);
+CREATE INDEX index_gav    ON gav (group_id, artifact_id, artifact_version);
+CREATE INDEX index_fname  ON gav (file_name);
 
 SELECT now() || ' Table gav create index finished' AS status;
 
