@@ -47,4 +47,26 @@ RUN_CMD="java $JAVA_OPTS -Xmx32g -server -jar $BASEDIR/../mavendb.jar -f $1 -d $
 echo "$(timestamp) $RUN_CMD"
 eval               $RUN_CMD
 
+if [ "$2" = "sqlite" ]; then
+  zip ../var/mavendb.sqlite.zip mavendb.sqlite
+
+elif [ "$2" = "psql" ]; then
+  sudo docker exec -t mavendb-psql pg_dump -U mavendbadmin mavendb | gzip > ../var/mavendb-psql.sql.gz
+
+elif [ "$2" = "mysql" ]; then
+  rm -f ~/.my.cnf
+  touch ~/.my.cnf
+  printf "[client]\nuser=%s\npassword=%s\n" "mavendbadmin" "123456" >> ~/.my.cnf
+
+  mysqldump --host=127.0.0.1 --port=3306 mavendb | gzip > ../var/mavendb-mysql.sql.gz
+
+elif [ "$2" = "mongodb" ]; then
+  sudo docker exec -t mavendb-mongo mongodump --host mavendb-mongo --username root --password 123456 --authenticationDatabase admin --authenticationMechanism SCRAM-SHA-256 --db mavendb --archive > ../var/mavendb-mongo.archive
+
+else
+  echo "$(timestamp) Invalid db type: $2. Expected sqlite, psql, mysql, or mongodb."
+  exit 1
+fi
+
+
 echo "Finished"

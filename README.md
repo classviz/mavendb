@@ -246,6 +246,10 @@ PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELE
 
 # Backup and Restore DB
 pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
+PGPASSWORD='123456' pg_dump -h localhost -U mavendbadmin -Fc -f mavendb-psql.dump mavendb
+
+sudo docker exec -t mavendb-psql pg_dump -U mavendbadmin mavendb | gzip > mavendb-psql.sql.gz
+
 psql -f mavendb-psql.sql postgres
 ```
 

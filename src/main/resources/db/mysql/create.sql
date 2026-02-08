@@ -30,15 +30,15 @@ CREATE TABLE         `gav` (
 
   `name`                        varchar(1024)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Record.name',                                    -- 2026.02  Max        486
 
-  `bundle_description`          varchar(4096)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-Description',                             -- 2026.02  Max      2,503
   `bundle_docurl`               varchar( 512)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-DocURL',                                  -- 2026.02  Max        221
   `bundle_license`              varchar(1024)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-License',                                 -- 2026.02  Max        463
   `bundle_name`                 varchar( 512)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-Name',                                    -- 2026.02  Max        155
   `bundle_symbolicname`         varchar( 512)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-SymbolicName',                            -- 2026.02  Max        179
   `bundle_version`              varchar( 256)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-Version',                                 -- 2026.02  Max        122
+  `bundle_description`             TEXT        COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Bundle-Description',                             -- 2026.02  Max      2,503
 
-  `require_bundle`              varchar(8196)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Require-Bundle',                                 -- 2026.02  Max      3,245
-  `export_service`              varchar(8196)  COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Export-Service',                                 -- 2026.02  Max      3,529
+  `require_bundle`                 TEXT        COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Require-Bundle',                                 -- 2026.02  Max      3,245
+  `export_service`                 TEXT        COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Export-Service',                                 -- 2026.02  Max      3,529
 
   `export_package`              MEDIUMTEXT     COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Export-Package',                                 -- 2026.02  Max  1,247,534
   `import_package`              MEDIUMTEXT     COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Import-Package',                                 -- 2026.02  Max     87,015
