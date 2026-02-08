@@ -48,17 +48,11 @@ Execute script [compose-psql.sh](compose-psql.sh)
 
 No setup required! SQLite stores everything in a single file.
 
-- Default database file: `mavendb.db` (created in the current directory)
+- Default database file: `mavendb.sqlite` (created in the current directory)
 - Configure the path in [config.properties](src/main/resources/etc/config.properties):
   ```properties
-  org.mavendb.sqlite.url=jdbc:sqlite:/path/to/mavendb.db
+  org.mavendb.sqlite.url=jdbc:sqlite:/path/to/mavendb.sqlite
   ```
-- **Performance Optimizations for 80-200 Million Records:**
-  - WAL (Write-Ahead Logging) mode enabled for better concurrency
-  - 64MB cache size for optimal performance
-  - Memory-mapped I/O (1GB) for faster reads
-  - Batch size of 20,000 records (configurable)
-  - Virtual threads for parallel writes
 
 
 ## Download Indexes
@@ -90,18 +84,23 @@ Build the Source Code
 * `./build.sh`
 
 How to Run the Tool
-* Come to the `dist\etc` folder, edit the `config.properties` file
-  * Modify the parameter `jakarta.persistence.jdbc.url` for the MySQL hostname
-  * Modify the parameter `jakarta.persistence.jdbc.user` for the username
-  * Modify the parameter `jakarta.persistence.jdbc.password` for the password
+* Come to the `dist` folder
+  * Unzip the file `mavendb-<version>-<timestampe>-bin.zip`
+* (Optional) Come to the `etc` edit the `config.properties` file
+  * The default values has been optimized, well we can still modify it when needed
 * Come to the `bin` folder, run either of the following commands
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql`
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb`
-  * `bin $` `./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql`
+
+```sh
+bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb
+bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql
+bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql
+bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ sqlite
+```
 
 
 ## Exeuction Time
 
+The following is the currrent execution time.
 - Since maven central artifacts is keep improving, so the runtime will be longer and longer
 
 |  Time    | artifacts count  | Runtime     | DB Type | Notes |
@@ -159,6 +158,37 @@ Access via DB Adminer: [http://localhost:10192/](http://localhost:10192/)
 
 ## Internal Only
 
+### Max Lengths
+
+Max length of the text fields of maven central repository.
+
+```
+sha1=106
+
+groupId=129
+artifactId=98
+version=118
+classifier=67
+packaging=113
+fileExtension=113
+name=486
+description=53217
+
+Bundle-Description=2503
+Bundle-DocURL=221
+Bundle-License=463
+Bundle-Name=155
+Bundle-SymbolicName=179
+Bundle-Version=122
+
+Export-Package=1247534
+Export-Service=3529
+Import-Package=87015
+Require-Bundle=3245
+
+repositoryId=7
+```
+
 
 ### Publish Site
 
@@ -182,13 +212,11 @@ Publish site
 
 ### Commands
 
-docker exec -i mavendb-mysql mysql -u <username> -p<password> < /path/to/your/script.sql
-
 Restart
 
 ```sh
-sudo docker compose -f compose-mysql.yml   restart
 sudo docker compose -f compose-mongodb.yml restart
+sudo docker compose -f compose-mysql.yml   restart
 sudo docker compose -f compose-psql.yml    restart
 ```
 
@@ -221,36 +249,6 @@ pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
 psql -f mavendb-psql.sql postgres
 ```
 
-### Max Lengths
-
-Max length of the text fields of maven central repository.
-
-```
-sha1=106
-
-groupId=129
-artifactId=98
-version=118
-classifier=67
-packaging=113
-fileExtension=113
-name=486
-description=53217
-
-Bundle-Description=2503
-Bundle-DocURL=221
-Bundle-License=463
-Bundle-Name=155
-Bundle-SymbolicName=179
-Bundle-Version=122
-
-Export-Package=1247534
-Export-Service=3529
-Import-Package=87015
-Require-Bundle=3245
-
-repositoryId=7
-```
 
 ### Sample Data
 

@@ -34,7 +34,7 @@ class ConfigurationManager {
     protected static final String DATABASE_NAME = "mavendb";
     protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/" + DATABASE_NAME;
     protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/" + DATABASE_NAME;
-    protected static final String DEFAULT_SQLITE_URL = "jdbc:sqlite:" + DATABASE_NAME + ".db";
+    protected static final String DEFAULT_SQLITE_URL = "jdbc:sqlite:" + DATABASE_NAME + ".sqlite";
     private static final int DEFAULT_MYSQL_BATCH_SIZE = 50000;
     private static final int DEFAULT_PSQL_BATCH_SIZE = 50000;
     /**
