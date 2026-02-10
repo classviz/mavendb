@@ -31,13 +31,6 @@
             </includes>
         </fileSet>
         <fileSet>
-            <directory>${project.build.directory}/etc</directory>
-            <outputDirectory>etc</outputDirectory>
-            <includes>
-                <include>*.properties</include>
-            </includes>
-        </fileSet>
-        <fileSet>
             <directory>${project.build.directory}/db/mysql</directory>
             <outputDirectory>db/mysql</outputDirectory>
             <includes>
@@ -56,6 +49,22 @@
             <outputDirectory>db/sqlite</outputDirectory>
             <includes>
                 <include>*.sql</include>
+            </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${project.build.directory}/docker</directory>
+            <outputDirectory>docker</outputDirectory>
+            <includes>
+                <include>.env</include>
+                <include>compose*</include>
+                <include>docker*</include>
+            </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${project.build.directory}/etc</directory>
+            <outputDirectory>etc</outputDirectory>
+            <includes>
+                <include>*.properties</include>
             </includes>
         </fileSet>
         <fileSet>

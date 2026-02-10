@@ -286,6 +286,24 @@
                     <propertiesEncoding>${project.build.sourceEncoding}</propertiesEncoding>
                 </configuration>
                 <executions>
+
+                    <execution>
+                        <id>copy-bin-scripts</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${basedir}/target/bin</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/resources/bin</directory>
+                                    <filtering>true</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+
                     <execution>
                         <id>copy-config</id>
                         <phase>validate</phase>
@@ -304,7 +322,7 @@
                     </execution>
 
                     <execution>
-                        <id>copy-database</id>
+                        <id>copy-db-scripts</id>
                         <phase>validate</phase>
                         <goals>
                             <goal>copy-resources</goal>
@@ -321,21 +339,22 @@
                     </execution>
 
                     <execution>
-                        <id>copy-scripts</id>
+                        <id>copy-docker</id>
                         <phase>validate</phase>
                         <goals>
                             <goal>copy-resources</goal>
                         </goals>
                         <configuration>
-                            <outputDirectory>${basedir}/target/bin</outputDirectory>
+                            <outputDirectory>${basedir}/target/docker</outputDirectory>
                             <resources>
                                 <resource>
-                                    <directory>src/main/resources/bin</directory>
+                                    <directory>src/main/resources/docker</directory>
                                     <filtering>true</filtering>
                                 </resource>
                             </resources>
                         </configuration>
                     </execution>
+
                 </executions>
             </plugin>
 

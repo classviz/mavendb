@@ -1,8 +1,18 @@
 #!/bin/bash
 #
-# Script to trigger sync the latest central maven index to local mysql db
+# Script to trigger sync the latest central maven index to a local database.
 #
-
+# For MySQL database, need to install mysql client:
+#   sudo apt install mysql-client
+#
+# Usage:
+#   ./run.sh <path_to_repos_folder> <db_type>
+# Example:
+#   ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb
+#   ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql
+#   ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql
+#   ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ sqlite
+#
 
 # Function
 timestamp() {
@@ -53,15 +63,23 @@ if [ "$2" = "sqlite" ]; then
 elif [ "$2" = "psql" ]; then
   sudo docker exec -t mavendb-psql pg_dump -U mavendbadmin mavendb | gzip > ../var/mavendb-psql.sql.gz
 
+  # Export tables to CSV
+  PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.g)     TO 'g.csv'   WITH (FORMAT CSV, HEADER);"
+  PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.ga)    TO 'ga.csv'  WITH (FORMAT CSV, HEADER);"
+  PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.v_gav) TO 'gav.csv' WITH (FORMAT CSV, HEADER);"
+  mv *.csv ../var/
+
 elif [ "$2" = "mysql" ]; then
+  # Here we use the root user to avoid the following error when dumping tablespaces:
+  # mysqldump: Error: 'Access denied; you need (at least one of) the PROCESS privilege(s) for this operation' when trying to dump tablespaces
   rm -f ~/.my.cnf
   touch ~/.my.cnf
-  printf "[client]\nuser=%s\npassword=%s\n" "mavendbadmin" "123456" >> ~/.my.cnf
+  printf "[client]\nuser=%s\npassword=%s\n" "root" "123456" >> ~/.my.cnf
 
   mysqldump --host=127.0.0.1 --port=3306 mavendb | gzip > ../var/mavendb-mysql.sql.gz
 
 elif [ "$2" = "mongodb" ]; then
-  sudo docker exec -t mavendb-mongo mongodump --host mavendb-mongo --username root --password 123456 --authenticationDatabase admin --authenticationMechanism SCRAM-SHA-256 --db mavendb --archive > ../var/mavendb-mongo.archive
+  sudo docker exec -t mavendb-mongo mongodump --host mavendb-mongo --username root --password 123456 --authenticationDatabase admin --authenticationMechanism SCRAM-SHA-256 --db mavendb --archive | gzip > ../var/mavendb-mongo.archive.gz
 
 else
   echo "$(timestamp) Invalid db type: $2. Expected sqlite, psql, mysql, or mongodb."

@@ -10,38 +10,38 @@ This application will scan all `maven` repos items and store them to database. S
 
 ### Option: MongoDB
 
-Execute script [compose-mongodb.sh](compose-mongodb.sh)
+Execute script [compose-mongodb.sh](src/main/resources/docker/compose-mongodb.sh)
 - `./compose-mongodb.sh`
 
 
 ### Option: MySQL
 
 A Docker Compose file has been configured
-* [compose-mysql.yml](compose-mysql.yml)
+* [compose-mysql.yml](src/main/resources/docker/compose-mysql.yml)
 
 Step 1. Config
-- Modify the passwords set in the [.env](.env) file based on security requirements
+- Modify the passwords set in the [.env](src/main/resources/docker/.env) file based on security requirements
 - Modify the `innodb_buffer_pool_size` in [docker-compose.yml](docker-compose.yml) based on hardware
 
 Step 2. Start
 - For `Ubuntu`/`Linux` users
   - [Install Docker](https://docs.docker.com/engine/install/ubuntu/)
-  - Execute script [compose-mysql.sh](compose-mysql.sh)
+  - Execute script [compose-mysql.sh](src/main/resources/docker/compose-mysql.sh)
     - `./compose-mysql.sh`
 - For MacOS Users
   - [Install Docker Desktop](https://docs.docker.com/desktop/install/mac-install/)
-  - Execute script [compose-mysql.sh](compose-mysql.sh)
+  - Execute script [compose-mysql.sh](src/main/resources/docker/compose-mysql.sh)
     - `./compose-mysql.sh`
 - For Windows Users
   - [Install Docker Desktop](https://docs.docker.com/desktop/install/windows-install/)
   - Make sure the [docker memory resource limit](https://stackoverflow.com/questions/43460770/docker-windows-container-memory-limit) is bigger than the MySQL `innodb_buffer_pool_size`
     - Example: on a 64GB RM Windows laptop, set `--innodb_buffer_pool_size=24G` will work for maven central scan
-  - Execute script [compose-mysql.ps1](compose-mysql.ps1)
+  - Execute script [compose-mysql.ps1](src/main/resources/docker/compose-mysql.ps1)
     - `powershell -ExecutionPolicy Bypass -File .\compose-mysql.ps1`
 
 ### Option: PSQL
 
-Execute script [compose-psql.sh](compose-psql.sh)
+Execute script [compose-psql.sh](src/main/resources/docker/compose-psql.sh)
 - `./compose-psql.sh`
 
 ### Option: SQLite
@@ -103,8 +103,8 @@ bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index
 The following is the currrent execution time.
 - Since maven central artifacts is keep improving, so the runtime will be longer and longer
 
-|  Time    | artifacts count  | Runtime     | DB Type | Notes |
-|----------|-----------------:|------------:|---------|-------|
+|  Time    | artifacts count  | Runtime     | DB Type | Notes                                 |
+|----------|-----------------:|------------:|---------|---------------------------------------|
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
@@ -120,14 +120,14 @@ The following is the currrent execution time.
 
 Local Mongo Express: [http://localhost:8081/](http://localhost:8081/)
 - Username: `root`
-- Password: use the password in [.env](.env) file
+- Password: use the password in [.env](src/main/resources/docker/.env) file
 
 
 ### MySQL
 
 Access via DB Adminer: [http://localhost:10191/](http://localhost:10191/)
-- Username: `mavendbadmin`, as defined in [.env](.env) file
-- Password: use the password in [.env](.env) file
+- Username: `mavendbadmin`, as defined in [.env](src/main/resources/docker/.env) file
+- Password: use the password in [.env](src/main/resources/docker/.env) file
 
 Access via REST API
 - Rest API user guide see [php-crud-api#treeql](https://github.com/mevdschee/php-crud-api#treeql-a-pragmatic-graphql)
@@ -143,7 +143,7 @@ Access via Docker Shell
 host $ sudo docker compose exec -it mavendb-mysql bash
 ```
 
-- Login to MySQL, use the password defined in [.env](.env) file 
+- Login to MySQL, use the password defined in [.env](src/main/resources/docker/.env) file
 ```
 container bash-5.1# mysql -p
 ```
@@ -153,7 +153,7 @@ container bash-5.1# mysql -p
 
 Access via DB Adminer: [http://localhost:10192/](http://localhost:10192/)
 - Username: `root`
-- Password: use the password in [.env](.env) file
+- Password: use the password in [.env](src/main/resources/docker/.env) file
 
 
 ## Internal Only
@@ -208,50 +208,6 @@ Maven Settings
 
 Publish site
 * `mvn clean site site:stage scm-publish:publish-scm`
-
-
-### Commands
-
-Restart
-
-```sh
-sudo docker compose -f compose-mongodb.yml restart
-sudo docker compose -f compose-mysql.yml   restart
-sudo docker compose -f compose-psql.yml    restart
-```
-
-MySQL
-
-```sh
-sudo apt install mysql-client
-
-# Backup and Restore DB
-mysqldump --host=127.0.0.1 --port=3306 -u mavendbadmin -p mavendb | gzip > mavendb-mysql.sql.gz
-```
-
-
-PSQL
-
-```sh
-# We need the pg client
-sudo apt install postgresql-client
-
-# Sample query
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "SELECT * FROM mavendb.g limit 10"
-
-# Export tables to CSV
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.g)     TO 'g.csv'   WITH (FORMAT CSV, HEADER);"
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.ga)    TO 'ga.csv'  WITH (FORMAT CSV, HEADER);"
-PGPASSWORD='123456' psql -h localhost -U mavendbadmin -d mavendb -c "\copy (SELECT * FROM mavendb.v_gav) TO 'gav.csv' WITH (FORMAT CSV, HEADER);"
-
-# Backup and Restore DB
-pg_dump -h localhost -U mavendbadmin -Fc mavendb -f mavendb-psql.sql
-PGPASSWORD='123456' pg_dump -h localhost -U mavendbadmin -Fc -f mavendb-psql.dump mavendb
-
-sudo docker exec -t mavendb-psql pg_dump -U mavendbadmin mavendb | gzip > mavendb-psql.sql.gz
-
-psql -f mavendb-psql.sql postgres
-```
 
 
 ### Sample Data
