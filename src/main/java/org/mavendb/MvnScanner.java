@@ -18,7 +18,6 @@ import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.maven.index.reader.ChunkReader;
 import org.apache.maven.index.reader.IndexReader;
 import org.apache.maven.index.reader.Record;
 import org.apache.maven.index.reader.RecordExpander;
@@ -227,6 +226,7 @@ class MvnScanner {
         } else if (this.dbType == DatabaseType.MONGODB) {
             this.databaseRepository.createIndexesMongoDB(this.indexId);
         }
+        this.databaseRepository.close();
 
         LOG.log(Level.INFO, "Max length of the String fields: {0}{1}", new Object[] {System.lineSeparator(),
                 this.maxLengthTracker.entrySet().stream()
@@ -302,67 +302,71 @@ class MvnScanner {
             LOG.log(Level.INFO,"isIncremental=" + indexReader.isIncremental());
             LOG.log(Level.INFO,"indexRequiredChunkNames=" + indexReader.getChunkNames());
 
-            for (ChunkReader chunkReader : indexReader) {
-                LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
-                LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
-                LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
+            // Do not iterate "indexReader" directly: its ChunkReader reads the gzip stream without a buffer,
+            // which made reading the slowest part of the scan. BufferedChunkReader reads the same format.
+            for (String chunkName : indexReader.getChunkNames()) {
+                try (BufferedChunkReader chunkReader = new BufferedChunkReader(chunkName, remote.locate(chunkName).read())) {
+                    LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
+                    LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
+                    LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
 
-                // List one by one all recordsin the chunk
-                final RecordExpander recordExpander = new RecordExpander();
-                long recordSeq = 0;
-                for (Map<String, String> rec : chunkReader) {
-                    recordSeq++;
-                    final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
-                    Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, recordSeq);
-                    record.getExpanded().forEach((k, v) -> {
-                        if (k.getProto().equals(String.class)) {
-                            String value = strip(record.getString(k));
-                            jsonDoc.append(k.getName(), value);
+                    // List one by one all recordsin the chunk
+                    final RecordExpander recordExpander = new RecordExpander();
+                    long recordSeq = 0;
+                    for (Map<String, String> rec : chunkReader) {
+                        recordSeq++;
+                        final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
+                        Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, recordSeq);
+                        record.getExpanded().forEach((k, v) -> {
+                            if (k.getProto().equals(String.class)) {
+                                String value = strip(record.getString(k));
+                                jsonDoc.append(k.getName(), value);
 
-                            // Track the maximum length of string values for each key for logging and potential future optimizations
-                            if (value != null) {
-                                maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
+                                // Track the maximum length of string values for each key for logging and potential future optimizations
+                                if (value != null) {
+                                    maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
+                                }
+                            } else if (k.getProto().equals(String[].class)) {
+                                List<String> stringList = new ArrayList<>();
+                                for (String s : record.getStringArray(k)) {
+                                    stringList.add(strip(s));
+                                }
+                                jsonDoc.append(k.getName(), stringList);
+                            } else if (k.getProto().equals(Long.class)) {
+                                jsonDoc.append(k.getName(), record.getLong(k));
+                            } else if (k.getProto().equals(Boolean.class)) {
+                                jsonDoc.append(k.getName(), record.getBoolean(k));
+                            } else {
+                                LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
                             }
-                        } else if (k.getProto().equals(String[].class)) {
-                            List<String> stringList = new ArrayList<>();
-                            for (String s : record.getStringArray(k)) {
-                                stringList.add(strip(s));
-                            }
-                            jsonDoc.append(k.getName(), stringList);
-                        } else if (k.getProto().equals(Long.class)) {
-                            jsonDoc.append(k.getName(), record.getLong(k));
-                        } else if (k.getProto().equals(Boolean.class)) {
-                            jsonDoc.append(k.getName(), record.getBoolean(k));
-                        } else {
-                            LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
+                        });
+
+                        // Parse version
+                        String versionString = record.getString(Record.VERSION);
+                        if (versionString == null || versionString.isBlank()) {
+                            LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
+                            continue;
                         }
-                    });
+                        VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
+                        jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.getMajorVersion());
+                        jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.getVersionSeq());
 
-                    // Parse version
-                    String versionString = record.getString(Record.VERSION);
-                    if (versionString == null || versionString.isBlank()) {
-                        LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
-                        continue;
+                        // Calculate file name
+                        String classifier = record.getString(Record.CLASSIFIER);
+                        String artifactId = record.getString(Record.ARTIFACT_ID);
+                        String artifactVersion = record.getString(Record.VERSION);
+                        String fileExtension = record.getString(Record.FILE_EXTENSION);
+
+                        String fileName = (classifier == null || classifier.isEmpty())
+                                ? artifactId + "-" + artifactVersion + "." + fileExtension
+                                : artifactId + "-" + artifactVersion + "-" + classifier + "." + fileExtension;
+                        jsonDoc.append(DatabaseRepository.JSON_FIELD_FILE_NAME, fileName);
+
+                        this.dataToBeStored.add(jsonDoc);
+                        this.store(false, recordSeq);
                     }
-                    VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
-                    jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.getMajorVersion());
-                    jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.getVersionSeq());
-
-                    // Calculate file name
-                    String classifier = record.getString(Record.CLASSIFIER);
-                    String artifactId = record.getString(Record.ARTIFACT_ID);
-                    String artifactVersion = record.getString(Record.VERSION);
-                    String fileExtension = record.getString(Record.FILE_EXTENSION);
-
-                    String fileName = (classifier == null || classifier.isEmpty())
-                            ? artifactId + "-" + artifactVersion + "." + fileExtension
-                            : artifactId + "-" + artifactVersion + "-" + classifier + "." + fileExtension;
-                    jsonDoc.append(DatabaseRepository.JSON_FIELD_FILE_NAME, fileName);
-
-                    this.dataToBeStored.add(jsonDoc);
-                    this.store(false, recordSeq);
+                    this.store(true, recordSeq);
                 }
-                this.store(true, recordSeq);
             }
         }
     }

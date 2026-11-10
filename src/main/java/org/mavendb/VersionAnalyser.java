@@ -1,6 +1,7 @@
 package org.mavendb;
 
 import java.util.StringTokenizer;
+import java.util.regex.Pattern;
 import org.apache.commons.lang3.math.NumberUtils;
 
 /**
@@ -21,7 +22,36 @@ final class VersionAnalyser {
     private static final int YEAR_LENGTH = 10;
 
     private static final String DOT = ".";
-    private static final String DOTS = "..";
+    /**
+     * Regular expression <code>[^\d.]</code>: matches any single character that is
+     * <b>not</b> an ASCII digit (<code>0</code>-<code>9</code>) and <b>not</b> a dot.
+     *
+     * <ul>
+     *   <li><code>[^...]</code> is a negated character class: one character not in the list</li>
+     *   <li><code>\d</code> is a digit. Without {@link Pattern#UNICODE_CHARACTER_CLASS}
+     *       it means only <code>[0-9]</code>, so non-ASCII digits such as <code>٢</code> also match</li>
+     *   <li><code>.</code> inside a character class is a literal dot, not "any character"</li>
+     * </ul>
+     *
+     * <p>The constructor replaces every match with {@link #DOT}, so letters, <code>-</code>,
+     * <code>_</code>, <code>+</code> etc. become version separators. The result is then split on dots;
+     * {@link StringTokenizer} skips the empty tokens that consecutive dots produce. Examples:
+     *
+     * <pre>
+     *   Version          After replace     Tokens
+     *   ---------------  ----------------  ---------------------
+     *   1.5.0-SNAPSHOT   1.5.0.........    1, 5, 0
+     *   2.0.0-RC1        2.0.0...1         2, 0, 0, 1
+     *   17-0.9.2         17.0.9.2          17, 0, 9, 2
+     *   v2.1.0           .2.1.0            2, 1, 0
+     *   v201604220928    .201604220928     201604220928 (treated as a date)
+     *   3                3                 no dot: whole value is the 4th version
+     * </pre>
+     *
+     * <p>The pattern is compiled once here because {@link String#replaceAll} compiles
+     * its regex again on every call, i.e. once per index record.
+     */
+    private static final Pattern NON_DIGIT_OR_DOT = Pattern.compile("[^\\d.]");
 
     /**
      * The major version of the artifact. We don't expect the major version
@@ -72,11 +102,9 @@ final class VersionAnalyser {
         long increVersion = 0;
         long four4Version = 0;
 
-        String versionTemp = version.replaceAll("[^\\d.]", DOT);
+        String versionTemp = NON_DIGIT_OR_DOT.matcher(version).replaceAll(DOT);
         if (versionTemp.contains(DOT)) {
-            while (versionTemp.contains(DOTS)) {
-                versionTemp = versionTemp.replace(DOTS, DOT);
-            }
+            // No need to collapse ".." into ".": StringTokenizer already skips empty tokens
             StringTokenizer tokenizer = new StringTokenizer(versionTemp, DOT);
 
             if (tokenizer.hasMoreTokens()) {

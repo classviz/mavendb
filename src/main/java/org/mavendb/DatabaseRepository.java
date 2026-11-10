@@ -33,7 +33,7 @@ import org.postgresql.util.PGobject;
  * Repository for database operations with support for MySQL, PostgreSQL, and MongoDB.
  * Handles all persistent storage operations for Maven records and documents.
  */
-class DatabaseRepository {
+class DatabaseRepository implements AutoCloseable {
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(DatabaseRepository.class.getName());
@@ -84,6 +84,12 @@ class DatabaseRepository {
     private final DatabaseType dbType;
     private final String dbUrl;
     private final Properties sqlConnectionProps;
+
+    /**
+     * Shared MongoDB client. A MongoClient owns a connection pool and is thread-safe, so it is created once
+     * and reused by every batch, instead of opening a new client (and new connections) per batch.
+     */
+    private volatile MongoClient mongoClient;
 
     /**
      * Constructor for SQL-based repositories (MySQL/PostgreSQL).
@@ -324,12 +330,10 @@ class DatabaseRepository {
      */
     protected void storeMongoDB(List<Document> storeDocuments, final long counter, final String mongoIndexId) {
         LocalDateTime begin = LocalDateTime.now();
-        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
-            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(mongoIndexId).insertMany(
-                storeDocuments,
-                new InsertManyOptions().ordered(false)
-            );
-        }
+        this.getMongoClient().getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(mongoIndexId).insertMany(
+            storeDocuments,
+            new InsertManyOptions().ordered(false)
+        );
         Duration duration = Duration.between(begin, LocalDateTime.now());
         LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
                 new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
@@ -337,15 +341,42 @@ class DatabaseRepository {
 
     protected void createIndexesMongoDB(String indexId) {
         long start = System.currentTimeMillis();
-        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
-            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
+        this.getMongoClient().getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
                 Indexes.ascending(Record.GROUP_ID.getName()),
                 Indexes.ascending(Record.ARTIFACT_ID.getName()),
                 Indexes.ascending(Record.VERSION.getName()),
                 Indexes.ascending(VersionAnalyser.KEY_VERSION_SEQ),
                 Indexes.ascending(VersionAnalyser.KEY_MAJOR_VERSION)
             ));
-        }
         LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});
+    }
+
+    /**
+     * Get the shared MongoDB client, creating it on first use.
+     */
+    private MongoClient getMongoClient() {
+        MongoClient client = this.mongoClient;
+        if (client == null) {
+            synchronized (this) {
+                client = this.mongoClient;
+                if (client == null) {
+                    client = MongoClients.create(this.dbUrl);
+                    this.mongoClient = client;
+                }
+            }
+        }
+        return client;
+    }
+
+    /**
+     * Release the shared MongoDB client, if any.
+     */
+    @Override
+    public void close() {
+        MongoClient client = this.mongoClient;
+        if (client != null) {
+            client.close();
+            this.mongoClient = null;
+        }
     }
 }

@@ -12,6 +12,12 @@ select concat(now(), ' Started');
 --
 
 
+-- Create the indexes first, so the UPDATE below is an index lookup instead of a full table scan
+ALTER TABLE gav
+ADD INDEX index_gav (group_id, artifact_id, artifact_version),
+ADD INDEX index_fname (file_name);
+
+
 -- Fix data for: `group_id` = 'org.apache.tomcat' AND `artifact_id` = 'tomcat'
 --   Problem        : after 2020-12-03/9.0.41 the ArtifactInfo only contains record for 'zip.sha512' but no data for the "zip" file
 --   Problem Example: https://repo1.maven.org/maven2/org/apache/tomcat/tomcat/9.0.41/  'tomcat-9.0.41.zip.sha512' exits but 'tomcat-9.0.41.zip' is missing
@@ -25,11 +31,6 @@ WHERE group_id       = 'org.apache.tomcat'
 ;
 
 select concat(now(), ' Table gav Fix org.apache.tomcat/tomcat/zip.sha512 finished');
-
-
-ALTER TABLE gav
-ADD INDEX index_gav (group_id, artifact_id, artifact_version),
-ADD INDEX index_fname (file_name);
 
 
 -- Refresh data for table g

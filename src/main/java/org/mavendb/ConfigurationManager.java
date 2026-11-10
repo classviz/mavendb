@@ -180,7 +180,8 @@ class ConfigurationManager {
         mysqlConnectionProps.setProperty("cachePrepStmts", "true");
         mysqlConnectionProps.setProperty("rewriteBatchedStatements", "true");
         mysqlConnectionProps.setProperty("unique_checks", "0");
-        mysqlConnectionProps.setProperty("useCompression", "true");
+        // No protocol compression: the database is local (Docker), so compressing only burns CPU on both ends
+        mysqlConnectionProps.setProperty("useCompression", "false");
         mysqlConnectionProps.setProperty("useLocalSessionState", "true");
         mysqlConnectionProps.setProperty("useServerPrepStmts", "true");
         mysqlConnectionProps.setProperty("useSSL", "false");
@@ -191,7 +192,11 @@ class ConfigurationManager {
 
         // Initialize PSQL connection properties with defaults
         psqlConnectionProps.setProperty("ssl", "false");
-        psqlConnectionProps.setProperty("synchronous_commit", "off");  // Improve performance by disabling synchronous commit
+        // Rewrite each JDBC batch into multi-row INSERT statements, instead of sending one INSERT per row
+        psqlConnectionProps.setProperty("reWriteBatchedInserts", "true");
+        // Improve performance by disabling synchronous commit.
+        // It is a server setting, so it must be passed via "options": as a plain property pgjdbc ignores it
+        psqlConnectionProps.setProperty("options", "-c synchronous_commit=off");
 
         psqlConnectionProps.setProperty("user", this.getDatabaseUser(CONFIG_PSQL_USER));
         psqlConnectionProps.setProperty("password", this.getDatabasePassword(CONFIG_PSQL_PASSWORD));

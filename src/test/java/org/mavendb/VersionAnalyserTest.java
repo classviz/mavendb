@@ -1,6 +1,7 @@
 package org.mavendb;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.DisplayName;
 
@@ -133,8 +134,8 @@ class VersionAnalyserTest {
         long seq2 = v2.getVersionSeq();
         assertEquals(1, v1.getMajorVersion());
         assertEquals(1, v2.getMajorVersion());
-        // Sequence values should differ
         // v1.1 > v1.0 in sequence (minor version is second part)
+        assertTrue(seq2 > seq1);
     }
 
     @Test
@@ -148,6 +149,7 @@ class VersionAnalyserTest {
         long seq1 = v1.getVersionSeq();
         long seq2 = v2.getVersionSeq();
         // seq2 should be significantly higher due to major version difference
+        assertTrue(seq2 > seq1);
     }
 
     @Test
