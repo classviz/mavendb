@@ -62,8 +62,8 @@ No setup required! SQLite stores everything in a single file.
 For maven central, download index files from the following address
 - https://repo.maven.apache.org/maven2/.index/
 - Nov 2026
-sh
-```
+
+```sh
 ~/develop/mavencentral/repo.maven.apache.org/maven2/.index$ ls -alh
 total 4.1G
 -rw-rw-r-- 1 4.1G Nov  9 23:12 nexus-maven-repository-index.gz
@@ -132,14 +132,27 @@ The following is the currrent execution time.
 | Sep 2023 |    `44,758,974`  |  `5.6` hour | MySQL   | innodb_buffer_pool_size=40G
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
-| Feb 2026 |    `89,587,849`  |  `1.7` hour | MySQL   | `4,061,407` + `1,980,766`, 50k batch
-| Feb 2026 |    `89,587,849`  |   `37` min  | PSQL    | `1,347,975` + `882,647`, 50k batch
-| Feb 2026 |    `89,587,849`  | `26.6` min  | Mongodb | `1,169,402` + `428,064`
-| Feb 2026 |    `89,587,849`  | `40.2` min  | SQLite  | `1,317,668` + `479,457`, 50k batch
-| Nov 2026 |   `115,697,728`  |  `2.0` hour | MySQL   | `6,214,297` + `1,131,991`
-| Nov 2026 |   `115,697,728`  | `38.4` min  | PSQL    | `1,401,990` + `904,862`
-| Nov 2026 |   `115,697,728`  | `26.6` min  | Mongodb | `1,242,975` + `353,517`
-| Nov 2026 |   `115,697,728`  | `30.3` min  | SQLite  | `1,338,312` + `482,009`, 100k batch
+
+Feb 2026
+- `89,587,849` artifacts
+
+| DB Type | Runtime     | Notes                                 |
+|---------|------------:|---------------------------------------|
+| MySQL   |  `1.7` hour | `4,061,407` + `1,980,766`, 50k batch
+| PSQL    |   `37` min  | `1,347,975` + `882,647`, 50k batch
+| Mongodb | `26.6` min  | `1,169,402` + `428,064`
+| SQLite  | `40.2` min  | `1,317,668` + `479,457`, 50k batch
+
+
+Nov 2026
+- `115,697,728` artifacts
+
+| DB Type | Runtime     | Notes                                 |
+|---------|------------:|---------------------------------------|
+| MySQL   |  `2.0` hour | `6,214,297` + `1,131,991`
+| PSQL    | `38.4` min  | `1,401,990` + `904,862`
+| Mongodb | `26.6` min  | `1,242,975` + `353,517`
+| SQLite  | `30.3` min  | `1,338,312` + `482,009`, 100k batch
 
 
 ## Access
