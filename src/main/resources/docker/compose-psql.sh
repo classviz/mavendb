@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 
 # Clean Docker containers, if exists

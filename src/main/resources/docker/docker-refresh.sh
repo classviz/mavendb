@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Refresh the docker images for the databases.
 # This is useful when you have made changes to the compose files and want to rebuild the images.

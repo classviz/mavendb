@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 # Script to trigger sync the latest central maven index to a local database.
 #

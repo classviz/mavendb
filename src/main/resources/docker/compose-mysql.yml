@@ -17,10 +17,8 @@ services:
     pull_policy: always
     # Buffer Pool Settings based on OS RAM Size
     #   OS RAM :  innodb_buffer_pool_size
-    #    16 GB                        10G
-    #    32 GB                        20G
     #    64 GB                        40G
-    #   128 GB                       100G
+    #   128 GB                        80G
     #
     # innodb_flush_log_at_trx_commit:
     #   For batch operations where absolute ACID compliance for every single intermediate write is not critical, setting this to 0 or 2 can improve write performance, though at the risk of losing a few seconds of data in a crash.
@@ -33,7 +31,8 @@ services:
       --default-time-zone='+00:00'
       --disable-log-bin
       --group_concat_max_len=52428800
-      --innodb_buffer_pool_size=100G
+      --innodb_adaptive_hash_index=OFF
+      --innodb_buffer_pool_size=80G
       --innodb_ddl_buffer_size=1G
       --innodb_ddl_threads=16
       --innodb_doublewrite=0

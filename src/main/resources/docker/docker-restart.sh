@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 #
 
 sudo docker compose -f compose-mongodb.yml restart
