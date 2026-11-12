@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -32,8 +33,12 @@ import org.postgresql.util.PGobject;
 /**
  * Repository for database operations with support for MySQL, PostgreSQL, and MongoDB.
  * Handles all persistent storage operations for Maven records and documents.
+ *
+ * <p>Connections are reused across batches: SQL writers borrow an idle connection (or open a new one)
+ * and return it after commit, so at most one connection exists per concurrent writer.
+ * MongoDB uses one shared, thread-safe {@link MongoClient}.
  */
-class DatabaseRepository {
+class DatabaseRepository implements AutoCloseable {
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(DatabaseRepository.class.getName());
@@ -81,9 +86,18 @@ class DatabaseRepository {
 
     private static final int SHA1_MAX_LENGTH = 40;
 
+    /** Timeout for checking an idle connection is still alive before reuse. */
+    private static final int CONNECTION_VALID_TIMEOUT_SECONDS = 2;
+
     private final DatabaseType dbType;
     private final String dbUrl;
     private final Properties sqlConnectionProps;
+
+    /** Idle SQL connections ready for reuse by writer threads. */
+    private final ConcurrentLinkedQueue<Connection> idleConnections = new ConcurrentLinkedQueue<>();
+
+    /** Shared MongoDB client, created lazily; it is thread-safe and pools connections internally. */
+    private MongoClient mongoClient;
 
     /**
      * Constructor for SQL-based repositories (MySQL/PostgreSQL).
@@ -141,9 +155,10 @@ class DatabaseRepository {
      */
     @SuppressFBWarnings(value = "VA_FORMAT_STRING_USES_NEWLINE", justification = "False positive for Java text blocks")
     protected void storeSQL(List<Document> storeList, final long counter) {
-        try (Connection conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps)) {
+        Connection conn = null;
+        try {
+            conn = borrowConnection();
             LocalDateTime begin = LocalDateTime.now();
-            conn.setAutoCommit(false);
 
             String tableName = this.dbType == DatabaseType.PSQL ? "mavendb.gav" : "gav";
             String sqlGav = """
@@ -189,11 +204,86 @@ class DatabaseRepository {
                 pstmt.executeBatch();
                 conn.commit();
             }
+
+            // Success: hand the connection back for the next batch
+            this.idleConnections.offer(conn);
+            conn = null;
+
             Duration duration = Duration.between(begin, LocalDateTime.now());
             LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
                     new Object[]{counter, duration.toSeconds(), storeList.size()});
         } catch (SQLException e) {
             LOG.log(Level.SEVERE, "Error during SQL persist operation for records counter=" + counter, e);
+        } finally {
+            // Failure: discard the connection, its state is unknown
+            if (conn != null) {
+                closeQuietly(conn, true);
+            }
+        }
+    }
+
+    /**
+     * Take an idle connection, or open a new one when none is available.
+     */
+    private Connection borrowConnection() throws SQLException {
+        Connection conn;
+        while ((conn = this.idleConnections.poll()) != null) {
+            if (conn.isValid(CONNECTION_VALID_TIMEOUT_SECONDS)) {
+                return conn;
+            }
+            LOG.log(Level.WARNING, "Discarding invalid idle {0} writer connection", this.dbType);
+            closeQuietly(conn, false);
+        }
+        conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps);
+        conn.setAutoCommit(false);
+        LOG.log(Level.INFO, "Opened new {0} writer connection", this.dbType);
+        return conn;
+    }
+
+    private static void closeQuietly(Connection conn, boolean rollback) {
+        try {
+            if (rollback) {
+                conn.rollback();
+            }
+        } catch (SQLException e) {
+            LOG.log(Level.FINE, "Rollback failed while discarding connection", e);
+        }
+        try {
+            conn.close();
+        } catch (SQLException e) {
+            LOG.log(Level.WARNING, "Failed to close SQL connection", e);
+        }
+    }
+
+    /**
+     * Close all idle SQL writer connections. Call after all writers finished,
+     * so no idle connection is left open while the post-load scripts run.
+     */
+    protected void closeSQLConnections() {
+        Connection conn;
+        int count = 0;
+        while ((conn = this.idleConnections.poll()) != null) {
+            closeQuietly(conn, false);
+            count++;
+        }
+        if (count > 0) {
+            LOG.log(Level.INFO, "Closed {0} {1} writer connections", new Object[]{count, this.dbType});
+        }
+    }
+
+    private synchronized MongoClient getMongoClient() {
+        if (this.mongoClient == null) {
+            this.mongoClient = MongoClients.create(this.dbUrl);
+        }
+        return this.mongoClient;
+    }
+
+    @Override
+    public synchronized void close() {
+        closeSQLConnections();
+        if (this.mongoClient != null) {
+            this.mongoClient.close();
+            this.mongoClient = null;
         }
     }
 
@@ -324,12 +414,10 @@ class DatabaseRepository {
      */
     protected void storeMongoDB(List<Document> storeDocuments, final long counter, final String mongoIndexId) {
         LocalDateTime begin = LocalDateTime.now();
-        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
-            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(mongoIndexId).insertMany(
-                storeDocuments,
-                new InsertManyOptions().ordered(false)
-            );
-        }
+        getMongoClient().getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(mongoIndexId).insertMany(
+            storeDocuments,
+            new InsertManyOptions().ordered(false)
+        );
         Duration duration = Duration.between(begin, LocalDateTime.now());
         LOG.log(Level.INFO, "MongoDB persist finished for position={0} in seconds={1} Millis={2}, batchSize={3}",
                 new Object[]{counter, duration.toSeconds(), duration.toMillis(), storeDocuments.size()});
@@ -337,15 +425,13 @@ class DatabaseRepository {
 
     protected void createIndexesMongoDB(String indexId) {
         long start = System.currentTimeMillis();
-        try (MongoClient mongoClient = MongoClients.create(this.dbUrl)) {
-            mongoClient.getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
-                Indexes.ascending(Record.GROUP_ID.getName()),
-                Indexes.ascending(Record.ARTIFACT_ID.getName()),
-                Indexes.ascending(Record.VERSION.getName()),
-                Indexes.ascending(VersionAnalyser.KEY_VERSION_SEQ),
-                Indexes.ascending(VersionAnalyser.KEY_MAJOR_VERSION)
-            ));
-        }
+        getMongoClient().getDatabase(ConfigurationManager.DATABASE_NAME).getCollection(indexId).createIndex(Indexes.compoundIndex(
+            Indexes.ascending(Record.GROUP_ID.getName()),
+            Indexes.ascending(Record.ARTIFACT_ID.getName()),
+            Indexes.ascending(Record.VERSION.getName()),
+            Indexes.ascending(VersionAnalyser.KEY_VERSION_SEQ),
+            Indexes.ascending(VersionAnalyser.KEY_MAJOR_VERSION)
+        ));
         LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});
     }
 }

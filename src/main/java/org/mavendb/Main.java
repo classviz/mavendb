@@ -5,11 +5,17 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Properties;
+import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.logging.SimpleFormatter;
 import java.util.stream.Collectors;
 
 import org.apache.commons.cli.CommandLine;
@@ -40,6 +46,11 @@ public class Main {
      * Directory for Configuration files.
      */
     private static final String DIR_ETC = "etc";
+
+    /**
+     * Directory for log files.
+     */
+    private static final String DIR_LOG = "log";
 
     /**
      * Get the directory which contains the configuration or scripts.
@@ -116,6 +127,8 @@ public class Main {
             return;
         }
 
+        Main.setupFileLogging(dbType);
+
         String reposFolder = line.getOptionValue(CommandOptions.OPTION_REPOS_FOLDER_LONGOPT);
         if (reposFolder.isBlank()) {
             LOG.log(Level.SEVERE, "Repository folder is required");
@@ -135,6 +148,26 @@ public class Main {
 
         LOG.log(Level.INFO, "Finished");
 
+    }
+
+    /**
+     * Add a log file handler to the root logger, so all log output also goes to
+     * <code>log/&lt;timestamp&gt;-&lt;dbtype&gt;.log</code> next to the jar file.
+     *
+     * @param dbType Database type, used as part of the log file name
+     * @throws IOException Failed to create the log folder or log file
+     */
+    private static void setupFileLogging(DatabaseType dbType) throws IOException {
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss"));
+        String logFileName = Main.getDirectoryFileName(DIR_LOG, timestamp + "-" + dbType.name().toLowerCase() + ".log");
+        Files.createDirectories(Path.of(Main.getDirectoryFileName(DIR_LOG, "")));
+
+        FileHandler fileHandler = new FileHandler(logFileName, false);
+        fileHandler.setEncoding(StandardCharsets.UTF_8.name());
+        fileHandler.setFormatter(new SimpleFormatter());
+        Logger.getLogger("").addHandler(fileHandler);
+
+        LOG.log(Level.INFO, "Log file: {0}", logFileName);
     }
 
     /**

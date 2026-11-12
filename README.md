@@ -133,8 +133,7 @@ The following is the currrent execution time.
 | Jul 2025 |    `76,619,430`  | `19.1` hour | MySQL   | innodb_buffer_pool_size=100G
 | Aug 2025 |    `76,638,341`  | `18.8` hour | MySQL   | `61,164,426` + `6,608,605`
 
-Feb 2026
-- `89,587,849` artifacts
+Feb 2026 - `89,587,849` artifacts
 
 | DB Type | Runtime     | Notes                                 |
 |---------|------------:|---------------------------------------|
@@ -144,8 +143,8 @@ Feb 2026
 | SQLite  | `40.2` min  | `1,317,668` + `479,457`, 50k batch
 
 
-Nov 2026
-- `115,697,728` artifacts
+Nov 2026 - `115,697,728` artifacts
+- Baseline
 
 | DB Type | Runtime     | Notes                                 |
 |---------|------------:|---------------------------------------|
@@ -154,6 +153,14 @@ Nov 2026
 | Mongodb | `26.6` min  | `1,242,975` + `353,517`
 | SQLite  | `30.3` min  | `1,338,312` + `482,009`, 100k batch
 
+- Improving
+
+| DB Type | Runtime     | Notes                                 |
+|---------|------------:|---------------------------------------|
+| MySQL   |  `1.2` hour | `3,326,073` + `1,020,137`
+| PSQL    | `35.8` min  | `1,299,360` + `851,347`
+| Mongodb | `25.3` min  | `1,174,760` + `340,287`
+| SQLite  | `29.3` min  | `1,289,606` + `482,009`, 100k batch
 
 ## Access
 

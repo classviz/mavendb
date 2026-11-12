@@ -2,11 +2,19 @@ networks:
   mavendbmysqlnet:
     driver: bridge
 
+# Inline init scripts, executed by the MySQL image as root on first database initialization
+configs:
+  mavendb-mysql-init:
+    content: |
+      -- Allow the app user to run: ALTER INSTANCE [DISABLE|ENABLE] INNODB REDO_LOG to speed up mass data loading
+      GRANT INNODB_REDO_LOG_ENABLE ON *.* TO 'mavendbadmin'@'%';
+
 services:
 
   # Mavendb Database
   mavendb-mysql:
-    image: mysql:8
+    image: mysql:9
+    pull_policy: always
     # Buffer Pool Settings based on OS RAM Size
     #   OS RAM :  innodb_buffer_pool_size
     #    16 GB                        10G
@@ -26,15 +34,16 @@ services:
       --disable-log-bin
       --group_concat_max_len=52428800
       --innodb_buffer_pool_size=100G
+      --innodb_ddl_buffer_size=1G
+      --innodb_ddl_threads=16
       --innodb_doublewrite=0
       --innodb_file_per_table=1
       --innodb_flush_log_at_timeout=4
       --innodb_flush_log_at_trx_commit=2
       --innodb_flush_method=O_DIRECT
       --innodb_log_buffer_size=256M
-      --innodb_log_file_size=4G
-      --innodb_log_files_in_group=4
       --innodb_read_io_threads=16
+      --innodb_redo_log_capacity=16G
       --innodb_sort_buffer_size=512M
       --innodb_write_io_threads=16
       --local_infile=1
@@ -43,7 +52,6 @@ services:
       --max_allowed_packet=1G
       --max_connections=32
       --max_heap_table_size=5G
-      --mysql_native_password=ON
       --read_rnd_buffer_size=512M
       --slow_query_log=1
       --skip-name-resolve
@@ -69,12 +77,16 @@ services:
     ports:
       # Map docker MySQL port to hosting machine
       - ${MYSQL_PORT}:3306
+    configs:
+      - source: mavendb-mysql-init
+        target: /docker-entrypoint-initdb.d/01-grant.sql
     networks:
       - mavendbmysqlnet
  
   # Database Admin Tool
   mavendb-mysql-adminer:
     image: adminer
+    pull_policy: always
     hostname: mavendb-mysql-adminer
     container_name: mavendb-mysql-adminer
     restart: always
@@ -91,6 +103,7 @@ services:
   # Rest API
   mavendb-mysql-api:
     image: mevdschee/php-crud-api
+    pull_policy: always
     hostname: mavendb-mysql-api
     container_name: mavendb-mysql-api
     environment:

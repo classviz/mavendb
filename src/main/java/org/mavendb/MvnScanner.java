@@ -47,7 +47,6 @@ class MvnScanner {
     private static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
 
     /* ------- Executor Configuration ------- */
-    private static final int EXECUTOR_CORE_THREADS = 2;
     private static final int EXECUTOR_KEEP_ALIVE_SECONDS = 60;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_30_SECONDS = 30;
     private static final int EXECUTOR_SHUTDOWN_TIMEOUT_60_SECONDS = 60;
@@ -184,8 +183,10 @@ class MvnScanner {
             executorCoreThreads = 1;
             maxConcurrentThreads = 1;
         } else {
-            executorCoreThreads = EXECUTOR_CORE_THREADS;
+            // Core threads must equal max threads: with an unbounded LinkedBlockingQueue,
+            // ThreadPoolExecutor never grows beyond the core size, so a smaller core would cap the writers
             maxConcurrentThreads = configMgr.parseThreadPoolSize();
+            executorCoreThreads = maxConcurrentThreads;
         }
 
         // Load max concurrent threads configuration
@@ -214,18 +215,25 @@ class MvnScanner {
             this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
         }
 
-        long start = System.currentTimeMillis();
-        this.stepScan();
+        try {
+            long start = System.currentTimeMillis();
+            this.stepScan();
 
-        // Shutdown virtual thread executor and wait for pending tasks with exponential backoff
-        shutdownExecutorGracefully();
-        LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
+            // Shutdown virtual thread executor and wait for pending tasks with exponential backoff
+            shutdownExecutorGracefully();
+            LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
-        // Refresh Data
-        if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
-            this.databaseRepository.executeSQLScript(DB_DATA_REFRESH_SQL);
-        } else if (this.dbType == DatabaseType.MONGODB) {
-            this.databaseRepository.createIndexesMongoDB(this.indexId);
+            // All writers are done, release their pooled connections before the post-load scripts
+            this.databaseRepository.closeSQLConnections();
+
+            // Refresh Data
+            if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
+                this.databaseRepository.executeSQLScript(DB_DATA_REFRESH_SQL);
+            } else if (this.dbType == DatabaseType.MONGODB) {
+                this.databaseRepository.createIndexesMongoDB(this.indexId);
+            }
+        } finally {
+            this.databaseRepository.close();
         }
 
         LOG.log(Level.INFO, "Max length of the String fields: {0}{1}", new Object[] {System.lineSeparator(),
@@ -302,6 +310,8 @@ class MvnScanner {
             LOG.log(Level.INFO,"isIncremental=" + indexReader.isIncremental());
             LOG.log(Level.INFO,"indexRequiredChunkNames=" + indexReader.getChunkNames());
 
+            // Sequence must be unique across all chunks, it is the primary key (seqid / _id)
+            long recordSeq = 0;
             for (ChunkReader chunkReader : indexReader) {
                 LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
                 LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
@@ -309,7 +319,6 @@ class MvnScanner {
 
                 // List one by one all recordsin the chunk
                 final RecordExpander recordExpander = new RecordExpander();
-                long recordSeq = 0;
                 for (Map<String, String> rec : chunkReader) {
                     recordSeq++;
                     final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);

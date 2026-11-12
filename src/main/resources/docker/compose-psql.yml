@@ -6,6 +6,7 @@ services:
 
   mavendb-psql:
     image: postgres:18
+    pull_policy: always
     hostname: mavendb-psql
     container_name: mavendb-psql
     restart: always
@@ -36,6 +37,7 @@ services:
 
   mavendb-psql-adminer:
     image: adminer
+    pull_policy: always
     hostname: mavendb-psql-adminer
     container_name: mavendb-psql-adminer
     restart: always

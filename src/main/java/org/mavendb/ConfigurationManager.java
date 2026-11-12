@@ -179,8 +179,10 @@ class ConfigurationManager {
         mysqlConnectionProps.setProperty("allowPublicKeyRetrieval", "true");
         mysqlConnectionProps.setProperty("cachePrepStmts", "true");
         mysqlConnectionProps.setProperty("rewriteBatchedStatements", "true");
-        mysqlConnectionProps.setProperty("unique_checks", "0");
-        mysqlConnectionProps.setProperty("useCompression", "true");
+        // Server session variables for bulk load; unique_checks is not a Connector/J property, so it must go here
+        mysqlConnectionProps.setProperty("sessionVariables", "unique_checks=0,foreign_key_checks=0");
+        // No protocol compression: the DB is local, compression only costs CPU on both sides
+        mysqlConnectionProps.setProperty("useCompression", "false");
         mysqlConnectionProps.setProperty("useLocalSessionState", "true");
         mysqlConnectionProps.setProperty("useServerPrepStmts", "true");
         mysqlConnectionProps.setProperty("useSSL", "false");

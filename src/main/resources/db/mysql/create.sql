@@ -1,3 +1,8 @@
+-- Disable InnoDB redo logging to speed up the bulk load.
+--   Requires the INNODB_REDO_LOG_ENABLE privilege (granted in docker/compose-mysql.yml).
+--   A crash while it is disabled corrupts the instance; simply rerun the import.
+ALTER INSTANCE DISABLE INNODB REDO_LOG;
+
 CREATE SCHEMA IF NOT EXISTS `mavendb` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin ;
 USE `mavendb`;
 
@@ -45,8 +50,11 @@ CREATE TABLE         `gav` (
 
   `description`                 MEDIUMTEXT     COLLATE utf8mb4_bin DEFAULT NULL COMMENT 'Record.description',                             -- 2026.02  Max     53,217
 
-  `json`                           json                           DEFAULT NULL COMMENT 'Other fields other than above'                    -- 2026.02  Max  1,263,656
+  `json`                           json                           DEFAULT NULL COMMENT 'Other fields other than above',                   -- 2026.02  Max  1,263,656
 
+  -- Explicit primary key: without it InnoDB uses a hidden row id guarded by a global mutex,
+  -- which serializes concurrent batch inserts
+  PRIMARY KEY (`seqid`)
 ) ENGINE=InnoDB COLLATE=utf8mb4_bin COMMENT='Groups Artifact Version';
 
 

@@ -5,7 +5,8 @@ networks:
 services:
   mavendb-mongo:
     # https://hub.docker.com/_/mongo
-    image: mongo
+    image: mongo:9
+    pull_policy: always
     hostname: mavendb-mongo
     container_name: mavendb-mongo
     restart: always
@@ -18,7 +19,9 @@ services:
       - mavendbmongonet
 
   mavendb-mongo-express:
+    # mongo-express is only an admin web UI, so following the newest release is low-risk.
     image: mongo-express
+    pull_policy: always
     hostname: mavendb-mongo-express
     container_name: mavendb-mongo-express
     restart: always
