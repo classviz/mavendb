@@ -4,6 +4,7 @@
 #
 # For MySQL database, need to install mysql client:
 #   sudo apt install mysql-client
+#   sudo apt install postgresql-client-common
 #
 # Usage:
 #   ./run.sh <path_to_repos_folder> <db_type>
@@ -40,7 +41,6 @@ JAVA_OPTS=" \
  -Xlog:codecache,gc*,safepoint:file=../log/jvmunified.log:level,tags,time,uptime,pid:filesize=209715200,filecount=10 \
  -XshowSettings:all \
  -XX:+UnlockDiagnosticVMOptions \
- -XX:NativeMemoryTracking=summary \
  -XX:+ExtensiveErrorReports \
  -XX:+HeapDumpOnOutOfMemoryError \
  -XX:+PerfDataSaveToFile \
@@ -61,6 +61,9 @@ if [ "$2" = "sqlite" ]; then
   zip ../var/mavendb.sqlite.zip mavendb.sqlite
 
 elif [ "$2" = "psql" ]; then
+  # Install PostgreSQL client if not already installed
+  sudo apt install postgresql-client-common -y
+
   sudo docker exec -t mavendb-psql pg_dump -U mavendbadmin mavendb | gzip > ../var/mavendb-psql.sql.gz
 
   # Export tables to CSV
@@ -70,6 +73,9 @@ elif [ "$2" = "psql" ]; then
   mv *.csv ../var/
 
 elif [ "$2" = "mysql" ]; then
+  # Install MySQL client if not already installed
+  sudo apt install mysql-client -y
+
   # Here we use the root user to avoid the following error when dumping tablespaces:
   # mysqldump: Error: 'Access denied; you need (at least one of) the PROCESS privilege(s) for this operation' when trying to dump tablespaces
   rm -f ~/.my.cnf

@@ -57,20 +57,44 @@ No setup required! SQLite stores everything in a single file.
 
 ## Download Indexes
 
-Download index files of the repo
+### Option 1: Download via wget
 
-- `wget -r -nc -l1 --no-parent https://repo.maven.apache.org/maven2/.index/`
-  - -r (or --recursive): Turns on recursive retrieving of files.
-  - -nc (or --no-clobber): skip those that already exist locally, use the 
-  - -l1 (or --level=1): Sets the maximum recursion depth to 1. This means it will only download files in the immediate directory specified by the URL and will not follow links into subdirectories or other parts of the website.
-  - --no-parent: Ensures that wget does not ascend to the parent directory of the specified URL, keeping the download contained within the target directory.
+For maven central, download index files from the following address
+- https://repo.maven.apache.org/maven2/.index/
+- Nov 2026
+sh
+```
+~/develop/mavencentral/repo.maven.apache.org/maven2/.index$ ls -alh
+total 4.1G
+-rw-rw-r-- 1 4.1G Nov  9 23:12 nexus-maven-repository-index.gz
+-rw-r--r-- 1 1.2K Nov  9 22:37 nexus-maven-repository-index.properties
+```
+
+### Option 2. Make use of [maven-indexer](https://github.com/apache/maven-indexer)
+
+```sh
+git clone https://github.com/apache/maven-indexer.git
+```
+
+Edit `BasicUsageExample`
+
+- To keep the files, add one line in BasicUsageExample.perform() after the request is created:
+```java
+IndexUpdateRequest updateRequest = new IndexUpdateRequest(centralContext, new Java11HttpClient());
+updateRequest.setLocalIndexCachePath(Path.of("target/central-gz-cache"));   // keeps the .gz + .properties files
+```
+
+```sh
+maven-indexer $ mvn clean install -DskipTests
+```
 
 ```
-Jan 2026
-
-Total wall clock time: 8m 34s
-Downloaded: 2114 files, 7.9G in 2m 34s (52.7 MB/s)
+cd indexer-examples/indexer-examples-basic
+indexer-examples-basic $ mvn -Pexamples test
 ```
+
+It downloads into this module’s target/ folder:
+- `target/central-index`: the Lucene index it builds
 
 
 ## Build and Run
@@ -85,16 +109,16 @@ Build the Source Code
 
 How to Run the Tool
 * Come to the `dist` folder
-  * Unzip the file `mavendb-<version>-<timestampe>-bin.zip`
+  * Go to folder `mavendb-<version>-<timestampe>`
 * (Optional) Come to the `etc` edit the `config.properties` file
   * The default values has been optimized, well we can still modify it when needed
 * Come to the `bin` folder, run either of the following commands
 
 ```sh
-bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mongodb
-bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ mysql
-bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ psql
-bin $ ./run.sh file:///path/to/central-index/repo.maven.apache.org/maven2/.index/ sqlite
+bin $ ./run.sh file:///home/<username>/develop/mavencentral/repo.maven.apache.org/maven2/.index/ mongodb
+bin $ ./run.sh file:///home/<username>/develop/mavencentral/repo.maven.apache.org/maven2/.index/ mysql
+bin $ ./run.sh file:///home/<username>/develop/mavencentral/repo.maven.apache.org/maven2/.index/ psql
+bin $ ./run.sh file:///home/<username>/develop/mavencentral/repo.maven.apache.org/maven2/.index/ sqlite
 ```
 
 
@@ -112,6 +136,10 @@ The following is the currrent execution time.
 | Feb 2026 |    `89,587,849`  |   `37` min  | PSQL    | `1,347,975` + `882,647`, 50k batch
 | Feb 2026 |    `89,587,849`  | `26.6` min  | Mongodb | `1,169,402` + `428,064`
 | Feb 2026 |    `89,587,849`  | `40.2` min  | SQLite  | `1,317,668` + `479,457`, 50k batch
+| Nov 2026 |   `115,697,728`  |  `2.0` hour | MySQL   | `6,214,297` + `1,131,991`
+| Nov 2026 |   `115,697,728`  | `38.4` min  | PSQL    | `1,401,990` + `904,862`
+| Nov 2026 |   `115,697,728`  | `26.6` min  | Mongodb | `1,242,975` + `353,517`
+| Nov 2026 |   `115,697,728`  | `30.3` min  | SQLite  | `1,338,312` + `482,009`, 100k batch
 
 
 ## Access
@@ -183,7 +211,7 @@ Bundle-Version=122
 
 Export-Package=1247534
 Export-Service=3529
-Import-Package=87015
+Import-Package=140582
 Require-Bundle=3245
 
 repositoryId=7
