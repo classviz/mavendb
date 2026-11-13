@@ -2,7 +2,16 @@
 #
 
 rm -rf dist/ target/
-mvn clean package test install -e
+
+# Compile first: the class dependency graph is generated from target/classes,
+# and must exist before 'package' builds the dist zip
+mvn clean compile -e || exit 1
+
+# Class dependency graph (packaged into the dist zip as doc/project.svg); -e keeps only org.mavendb classes
+jdeps -verbose:class -filter:none -e 'org\.mavendb\..*' -dotoutput target/jdeps target/classes || exit 1
+dot -Tsvg target/jdeps/classes.dot -o target/jdeps/project.svg || exit 1
+
+mvn package test install -e
 
 # Generate javadoc
 #mvn javadoc:javadoc

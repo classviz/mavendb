@@ -10,13 +10,11 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.Properties;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
-import java.util.stream.Collectors;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -43,33 +41,11 @@ public class Main {
     private static final String CONFIG_FILE = "config.properties";
 
     /**
-     * Directory for Configuration files.
-     */
-    private static final String DIR_ETC = "etc";
-
-    /**
-     * Directory for log files.
-     */
-    private static final String DIR_LOG = "log";
-
-    /**
-     * Get the directory which contains the configuration or scripts.
-     *
-     * @param dir Directory name, like {@link #DIR_ETC}, {@link #DIR_LOG}, <code>db/mysql</code>
-     * @param file File name, like {@link #CONFIG_FILE}, {@link MvnScanner#DB_CREATE_SQL}
-     * @return The full path of the file
-     */
-    protected static String getDirectoryFileName(String dir, String file) {
-        File baseDir = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().getPath());
-        return baseDir.getParent() + File.separator + dir + File.separator + file;
-    }
-
-    /**
      * Load the {@link #CONFIG_FILE}.
      */
     private static Properties loadConfig() throws IOException {
         // Get the config file name
-        String configFileName = Main.getDirectoryFileName(DIR_ETC, CONFIG_FILE);
+        String configFileName = AppPaths.getFileName(AppPaths.DIR_ETC, CONFIG_FILE);
 
         // Load the Config values
         Properties configValues = new Properties();
@@ -159,8 +135,8 @@ public class Main {
      */
     private static void setupFileLogging(DatabaseType dbType) throws IOException {
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd.HHmmss"));
-        String logFileName = Main.getDirectoryFileName(DIR_LOG, timestamp + "-" + dbType.name().toLowerCase() + ".log");
-        Files.createDirectories(Path.of(Main.getDirectoryFileName(DIR_LOG, "")));
+        String logFileName = AppPaths.getFileName(AppPaths.DIR_LOG, timestamp + "-" + dbType.name().toLowerCase() + ".log");
+        Files.createDirectories(Path.of(AppPaths.getFileName(AppPaths.DIR_LOG, "")));
 
         FileHandler fileHandler = new FileHandler(logFileName, false);
         fileHandler.setEncoding(StandardCharsets.UTF_8.name());
@@ -233,17 +209,6 @@ public class Main {
             OPTIONS.addOption(OPTION_DB_TYPE);
             OPTIONS.addOption(OPTION_REPOS_FOLDER);
             OPTIONS.addOption(OPTION_HELP);
-        }
-    }
-
-    static enum DatabaseType {
-        MYSQL,
-        MONGODB,
-        PSQL,
-        SQLITE;
-
-        static String names() {
-            return Arrays.stream(DatabaseType.values()) .map(e -> e.name().toLowerCase()).collect(Collectors.joining(","));
         }
     }
 }

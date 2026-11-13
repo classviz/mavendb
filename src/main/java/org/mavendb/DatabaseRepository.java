@@ -1,6 +1,5 @@
 package org.mavendb;
 
-import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -27,7 +26,6 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import org.apache.ibatis.jdbc.ScriptRunner;
 import org.apache.maven.index.reader.Record;
 import org.bson.Document;
-import org.mavendb.Main.DatabaseType;
 import org.postgresql.util.PGobject;
 
 /**
@@ -133,7 +131,7 @@ class DatabaseRepository implements AutoCloseable {
             // Directory for DB scripts are in the folder of "db/<dbtype>"
             try (Connection conn = DriverManager.getConnection(this.dbUrl, this.sqlConnectionProps);
                 Reader r = new FileReader(
-                    Main.getDirectoryFileName("db" + File.separator + this.dbType.name().toLowerCase(), script),
+                    AppPaths.getDbScriptFileName(this.dbType, script),
                     StandardCharsets.UTF_8)
             ) {
                 long start = System.currentTimeMillis();

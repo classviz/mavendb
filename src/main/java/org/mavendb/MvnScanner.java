@@ -30,7 +30,6 @@ import org.apache.maven.index.reader.WritableResourceHandler;
 import org.apache.maven.index.reader.resource.PathWritableResourceHandler;
 import org.apache.maven.index.reader.resource.UriResourceHandler;
 import org.bson.Document;
-import org.mavendb.Main.DatabaseType;
 
 /**
  * Scan all artifacts in maven repository.
@@ -53,13 +52,13 @@ class MvnScanner {
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
 
     /**
-     * @see {@link Main.CommandOptions#OPTION_REPOS_FOLDER}.
-     */    
+     * Index folder, from the <code>--reposfolder</code> command line option.
+     */
     private final URI indexFolder;
 
     /**
-     * @see {@link Main.CommandOptions#OPTION_DB_TYPE}.
-     */    
+     * Target database type, from the <code>--dbtype</code> command line option.
+     */
     private final DatabaseType dbType;
 
     /**

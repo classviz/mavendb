@@ -103,6 +103,9 @@ Requriments
 
 * OpenJDK `25` or later
 * Maven `3.9.3` or later
+* Optionally: `graphviz` for code relation diagram
+  * MacOS: `sudo apt install graphviz -y`
+  * Ubuntu: `brew install graphviz`
 
 Build the Source Code
 * `./build.sh`
