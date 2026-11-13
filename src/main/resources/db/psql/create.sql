@@ -33,7 +33,7 @@ CREATE UNLOGGED TABLE gav (
 
     group_id            varchar(256) NOT NULL,
     artifact_id         varchar(256) NOT NULL,
-    artifact_version    varchar(128) NOT NULL,
+    artifact_version    varchar(256) NOT NULL,
 
     classifier          varchar(128),
     packaging           varchar(256),

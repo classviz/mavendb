@@ -1,6 +1,7 @@
 package org.mavendb;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -8,14 +9,16 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Semaphore;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
+import java.util.stream.Gatherers;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.maven.index.reader.ChunkReader;
@@ -45,14 +48,6 @@ class MvnScanner {
      * SQL script to refresh data.
      */
     private static final String DB_DATA_REFRESH_SQL = "data-refresh.sql";
-
-    /* ------- Executor Configuration ------- */
-    private static final int EXECUTOR_KEEP_ALIVE_SECONDS = 60;
-    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_30_SECONDS = 30;
-    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_60_SECONDS = 60;
-    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_300_SECONDS = 300;
-    private static final int EXECUTOR_SHUTDOWN_TIMEOUT_600_SECONDS = 600;
-    private static final int EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS = 5;
 
     /** Logger. */
     private static final Logger LOG = Logger.getLogger(MvnScanner.class.getName());
@@ -85,19 +80,16 @@ class MvnScanner {
     private DatabaseRepository databaseRepository;
 
     /**
-     * Virtual thread executor for asynchronous store operations.
-     * Uses Java virtual threads (Project Loom) with configurable concurrency limit.
-     *
-     * @see {@link ConfigurationManager#getSqlQueueMaxSize()}
-     * @see {@link ConfigurationManager#getSqlQueueResumeSize()}
+     * Limits the number of batches written to the database at the same time.
+     * Created in {@link #perform(Properties)}, see {@link #stepScan(int)} for why it is needed.
      */
-    private ThreadPoolExecutor storeExecutor;
+    private Semaphore writerPermits;
 
     /**
-     * JSON Documents to be saved to DB.
+     * Record sequence, unique across all chunks: it is the primary key (seqid / _id).
+     * Only touched by the scanning thread (the stream before {@code mapConcurrent} is sequential).
      */
-    private List<Document> dataToBeStored = new ArrayList<>();
-
+    private long recordSeq;
 
     /**
      * Track the max length of string values for each key for logging and potential future optimizations.
@@ -177,30 +169,15 @@ class MvnScanner {
     public void perform(Properties config) throws IOException, SQLException {
         this.configMgr = new ConfigurationManager(config);
 
-        int executorCoreThreads, maxConcurrentThreads;
+        int writers;
         if (this.dbType == DatabaseType.SQLITE) {
             LOG.log(Level.INFO, "SQLite only allows one writer, cannot write in multiple threads");
-            executorCoreThreads = 1;
-            maxConcurrentThreads = 1;
+            writers = 1;
         } else {
-            // Core threads must equal max threads: with an unbounded LinkedBlockingQueue,
-            // ThreadPoolExecutor never grows beyond the core size, so a smaller core would cap the writers
-            maxConcurrentThreads = configMgr.getThreadPoolSize();
-            executorCoreThreads = maxConcurrentThreads;
+            writers = configMgr.getThreadPoolSize();
         }
-
-        // Load max concurrent threads configuration
-        LOG.log(Level.INFO, "Virtual thread pool size configured: core threads {0}, max threads {1}", new Object[]{executorCoreThreads, maxConcurrentThreads});
-
-        // Create bounded virtual thread executor with configured concurrency limit
-        this.storeExecutor = new ThreadPoolExecutor(
-            executorCoreThreads,
-            maxConcurrentThreads,
-            EXECUTOR_KEEP_ALIVE_SECONDS,
-            TimeUnit.SECONDS,
-            new LinkedBlockingQueue<>(),
-            Thread.ofVirtual().factory()
-        );
+        LOG.log(Level.INFO, "Concurrent database writers: {0}", writers);
+        this.writerPermits = new Semaphore(writers);
 
         this.databaseRepository = switch (this.dbType) {
             case MYSQL -> new DatabaseRepository(DatabaseType.MYSQL, configMgr.getMysqlUrl(), configMgr.mysqlConnectionProps);
@@ -214,10 +191,13 @@ class MvnScanner {
 
         try {
             long start = System.currentTimeMillis();
-            this.stepScan();
-
-            // Shutdown virtual thread executor and wait for pending tasks with exponential backoff
-            shutdownExecutorGracefully();
+            try {
+                // Returns only after every batch is written; a failed batch throws and stops the scan
+                this.stepScan(writers);
+            } catch (RuntimeException e) {
+                LOG.log(Level.SEVERE, "Scan failed, the database is incomplete, rerun the import", e);
+                throw e;
+            }
             LOG.log(Level.INFO, "Scan execution time={0}", System.currentTimeMillis() - start);
 
             // All writers are done, release their pooled connections before the post-load scripts
@@ -240,60 +220,27 @@ class MvnScanner {
     }
 
     /**
-     * Shutdown the executor gracefully with progressive timeouts.
-     * First attempts immediate termination with a short timeout (30 seconds).
-     * If that fails, progressively increases timeout up to 10 minutes before forcing shutdown.
-     */
-    private void shutdownExecutorGracefully() {
-        this.storeExecutor.shutdown();
-        LOG.log(Level.INFO, "Virtual thread executor shutdown requested, waiting for pending tasks...");
-
-        long[] timeouts = {
-            EXECUTOR_SHUTDOWN_TIMEOUT_30_SECONDS,
-            EXECUTOR_SHUTDOWN_TIMEOUT_60_SECONDS,
-            EXECUTOR_SHUTDOWN_TIMEOUT_300_SECONDS,
-            EXECUTOR_SHUTDOWN_TIMEOUT_600_SECONDS
-        };
-        TimeUnit unit = TimeUnit.SECONDS;
-
-        for (int i = 0; i < timeouts.length; i++) {
-            try {
-                if (this.storeExecutor.awaitTermination(timeouts[i], unit)) {
-                    LOG.log(Level.INFO, "Virtual thread executor terminated gracefully after {0} seconds", timeouts[i]);
-                    return;
-                }
-
-                int queueSize = this.storeExecutor.getQueue().size();
-                LOG.log(Level.INFO, "Waiting for executor termination (attempt {0}/{1}): {2} tasks remaining",
-                    new Object[]{i + 1, timeouts.length, queueSize});
-            } catch (InterruptedException e) {
-                LOG.log(Level.WARNING, "Virtual thread executor shutdown was interrupted", e);
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-
-        // Force shutdown if graceful shutdown failed
-        LOG.log(Level.WARNING, "Virtual thread executor did not terminate within timeout, forcing shutdown");
-        this.storeExecutor.shutdownNow();
-        try {
-            if (!this.storeExecutor.awaitTermination(EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                LOG.log(Level.SEVERE, "Virtual thread executor did not respond to shutdownNow within {0} seconds", EXECUTOR_FINAL_SHUTDOWN_TIMEOUT_SECONDS);
-            }
-        } catch (InterruptedException e) {
-            LOG.log(Level.SEVERE, "Interrupted while waiting for executor to respond to shutdownNow", e);
-            Thread.currentThread().interrupt();
-        }
-    }
-
-
-    /**
-     * Scan maven index files.
+     * Scan maven index files and write them to the database in batches.
      *
-     * @throws IOException Exception
+     * <p>Pipeline (Java 24+ stream gatherers, JEP 485):
+     * <pre>
+     *   chunks → records → Document → windowFixed(batchSize) → mapConcurrent(writers + 1, storeBatch)
+     * </pre>
+     * The stream up to {@code windowFixed} runs on this thread; {@code storeBatch} runs on virtual threads.
+     *
+     * <p>Why {@code writers + 1} tasks plus {@link #writerPermits}: {@code mapConcurrent} blocks the scanning
+     * thread whenever all of its task slots are busy. With exactly {@code writers} slots, the next batch
+     * could only be read after a write finished, leaving a writer idle while it is read; for SQLite (one writer)
+     * reading and writing would not overlap at all. The extra slot holds one ready batch that waits for a permit,
+     * so the writers stay busy while the following batch is read.
+     *
+     * <p>Memory: at most {@code writers + 2} batches (writing, one ready, one being filled).
+     * A failed batch throws out of this method; the other in-flight batches are cancelled.
+     *
+     * @param writers Maximum number of batches written at the same time
+     * @throws IOException Failed to read the index
      */
-    @SuppressWarnings("java:S3776") // Cognitive Complexity of methods should not be too high
-    private void stepScan() throws IOException {
+    private void stepScan(int writers) throws IOException {
         Path tempDir = Files.createTempDirectory("mvn-index");
 
         try (
@@ -307,130 +254,131 @@ class MvnScanner {
             LOG.log(Level.INFO,"isIncremental=" + indexReader.isIncremental());
             LOG.log(Level.INFO,"indexRequiredChunkNames=" + indexReader.getChunkNames());
 
-            // Sequence must be unique across all chunks, it is the primary key (seqid / _id)
-            long recordSeq = 0;
-            for (ChunkReader chunkReader : indexReader) {
-                LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
-                LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
-                LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
+            int batchSize = switch (this.dbType) {
+                case MYSQL -> this.configMgr.getMysqlBatchSize();
+                case PSQL -> this.configMgr.getPsqlBatchSize();
+                case SQLITE -> this.configMgr.getSqliteBatchSize();
+                case MONGODB -> this.configMgr.getMongodbBatchSize();
+            };
 
-                // List one by one all recordsin the chunk
-                final RecordExpander recordExpander = new RecordExpander();
-                for (Map<String, String> rec : chunkReader) {
-                    recordSeq++;
-                    final org.apache.maven.index.reader.Record record = recordExpander.apply(rec);
-                    Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, recordSeq);
-                    record.getExpanded().forEach((k, v) -> {
-                        if (k.getProto().equals(String.class)) {
-                            String value = strip(record.getString(k));
-                            jsonDoc.append(k.getName(), value);
-
-                            // Track the maximum length of string values for each key for logging and potential future optimizations
-                            if (value != null) {
-                                maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
-                            }
-                        } else if (k.getProto().equals(String[].class)) {
-                            List<String> stringList = new ArrayList<>();
-                            for (String s : record.getStringArray(k)) {
-                                stringList.add(strip(s));
-                            }
-                            jsonDoc.append(k.getName(), stringList);
-                        } else if (k.getProto().equals(Long.class)) {
-                            jsonDoc.append(k.getName(), record.getLong(k));
-                        } else if (k.getProto().equals(Boolean.class)) {
-                            jsonDoc.append(k.getName(), record.getBoolean(k));
-                        } else {
-                            LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
-                        }
-                    });
-
-                    // Parse version
-                    String versionString = record.getString(Record.VERSION);
-                    if (versionString == null || versionString.isBlank()) {
-                        LOG.log(Level.WARNING, "Record without version found, skipping: {0}", record);
-                        continue;
-                    }
-                    VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
-                    jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.majorVersion());
-                    jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.versionSeq());
-
-                    // Calculate file name
-                    String classifier = record.getString(Record.CLASSIFIER);
-                    String artifactId = record.getString(Record.ARTIFACT_ID);
-                    String artifactVersion = record.getString(Record.VERSION);
-                    String fileExtension = record.getString(Record.FILE_EXTENSION);
-
-                    String fileName = (classifier == null || classifier.isEmpty())
-                            ? artifactId + "-" + artifactVersion + "." + fileExtension
-                            : artifactId + "-" + artifactVersion + "-" + classifier + "." + fileExtension;
-                    jsonDoc.append(DatabaseRepository.JSON_FIELD_FILE_NAME, fileName);
-
-                    this.dataToBeStored.add(jsonDoc);
-                    this.store(false, recordSeq);
-                }
-                this.store(true, recordSeq);
+            this.recordSeq = 0;
+            long stored;
+            try (Stream<ChunkReader> chunks = StreamSupport.stream(indexReader.spliterator(), false)) {
+                stored = chunks
+                    .flatMap(this::chunkRecords)
+                    .map(this::toDocument)
+                    .filter(Objects::nonNull)
+                    .gather(Gatherers.windowFixed(batchSize))
+                    .gather(Gatherers.mapConcurrent(writers + 1, this::storeBatch))
+                    .mapToLong(Integer::longValue)
+                    .sum();
             }
+            LOG.log(Level.INFO, "Scanned {0} records, stored {1} records", new Object[]{this.recordSeq, stored});
         }
     }
 
     /**
-     * Avoid overloading the store executor by waiting when the queue size exceeds maxQueueSize.
-     *
-     * @param maxQueueSize Maximum allowed queue size before pausing submissions
-     * @param resumeQueueSize Queue size to resume submissions
+     * Stream the expanded records of one chunk; the chunk is closed when its stream is consumed.
      */
-    private void avoidOverload(int maxQueueSize, int resumeQueueSize) {
-        // If the store executor queue is too long, wait for it to reduce
-        if (this.storeExecutor.getQueue().size() > maxQueueSize) {
-            LOG.log(Level.WARNING, "Store executor queue size is large: {0}, waiting for space...", this.storeExecutor.getQueue().size());
-            while (this.storeExecutor.getQueue().size() > resumeQueueSize) {
-                LOG.info("Current thread queue size is " + this.storeExecutor.getQueue().size());
+    private Stream<Record> chunkRecords(ChunkReader chunkReader) {
+        LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
+        LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
+        LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
+
+        RecordExpander recordExpander = new RecordExpander();
+        return StreamSupport.stream(chunkReader.spliterator(), false)
+            .map(recordExpander)
+            .onClose(() -> {
                 try {
-                    Thread.sleep(200);
-                } catch (InterruptedException _) {
-                    Thread.currentThread().interrupt();
+                    chunkReader.close();
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
                 }
-            }
-            LOG.log(Level.INFO, "Store executor queue size reduced to: {0}, resuming submission", this.storeExecutor.getQueue().size());
-        }
+            });
     }
 
     /**
-     * Store to database.
+     * Convert one index record to a JSON document.
      *
-     * @param force Flag to force save or not
-     * @param counter Record counter
+     * @return The document, or <code>null</code> when the record has no version and is skipped
      */
-    private void store(final boolean force, final long counter) {
-        // Nothing to be saved
-        if (this.dataToBeStored.isEmpty()) {
-            return;
+    private Document toDocument(Record record) {
+        this.recordSeq++;
+        Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, this.recordSeq);
+        record.getExpanded().forEach((k, v) -> {
+            if (k.getProto().equals(String.class)) {
+                String value = strip(record.getString(k));
+                jsonDoc.append(k.getName(), value);
+
+                // Track the maximum length of string values for each key for logging and potential future optimizations
+                if (value != null) {
+                    maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
+                }
+            } else if (k.getProto().equals(String[].class)) {
+                List<String> stringList = new ArrayList<>();
+                for (String s : record.getStringArray(k)) {
+                    stringList.add(strip(s));
+                }
+                jsonDoc.append(k.getName(), stringList);
+            } else if (k.getProto().equals(Long.class)) {
+                jsonDoc.append(k.getName(), record.getLong(k));
+            } else if (k.getProto().equals(Boolean.class)) {
+                jsonDoc.append(k.getName(), record.getBoolean(k));
+            } else {
+                LOG.log(Level.WARNING,"Unrecognized key type: " + k + "=" + v + ", name=" + k.getName() + ", type=" + v.getClass().getSimpleName());
+            }
+        });
+
+        // Parse version
+        String versionString = record.getString(Record.VERSION);
+        if (versionString == null || versionString.isBlank()) {
+            // DESCRIPTOR, ALL_GROUPS and ROOT_GROUPS are index metadata and never have a version
+            Level level = record.getType() == Record.Type.ARTIFACT_ADD ? Level.WARNING : Level.FINE;
+            LOG.log(level, "Record without version found, skipping: {0}", record.getType());
+            return null;
         }
+        VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
+        jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.majorVersion());
+        jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.versionSeq());
 
-        int batchSize = switch (this.dbType) {
-            case MYSQL -> this.configMgr.getMysqlBatchSize();
-            case PSQL -> this.configMgr.getPsqlBatchSize();
-            case SQLITE -> this.configMgr.getSqliteBatchSize();
-            case MONGODB -> this.configMgr.getMongodbBatchSize();
-        };
+        // Calculate file name
+        String classifier = record.getString(Record.CLASSIFIER);
+        String artifactId = record.getString(Record.ARTIFACT_ID);
+        String fileExtension = record.getString(Record.FILE_EXTENSION);
 
-        // Save batchSize records as a group,
-        // Or when force save, save it no matter of the size
-        if (this.dataToBeStored.size() < batchSize && !force) {
-            return;
+        String fileName = (classifier == null || classifier.isEmpty())
+                ? artifactId + "-" + versionString + "." + fileExtension
+                : artifactId + "-" + versionString + "-" + classifier + "." + fileExtension;
+        jsonDoc.append(DatabaseRepository.JSON_FIELD_FILE_NAME, fileName);
+
+        return jsonDoc;
+    }
+
+    /**
+     * Write one batch to the database. Runs on a virtual thread started by {@code mapConcurrent}.
+     *
+     * @param batch Documents to write
+     * @return Number of documents written
+     */
+    private Integer storeBatch(List<Document> batch) {
+        // Read before storing: binding the SQL parameters removes fields from the documents
+        long counter = batch.getLast().getLong(DatabaseRepository.JSON_FIELD_ID);
+        try {
+            this.writerPermits.acquire();
+        } catch (InterruptedException e) {
+            // Cancelled because another batch failed
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting to store records counter=" + counter, e);
         }
-
-        this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
-
-        // Submit store operation to virtual thread for asynchronous execution.
-        List<Document> docsToStore = List.copyOf(this.dataToBeStored);
-        switch (this.dbType) {
-            case MYSQL, PSQL, SQLITE -> this.storeExecutor.submit(() -> this.databaseRepository.storeSQL(docsToStore, counter));
-            case MONGODB -> this.storeExecutor.submit(() -> this.databaseRepository.storeMongoDB(docsToStore, counter, this.indexId));
+        try {
+            switch (this.dbType) {
+                case MYSQL, PSQL, SQLITE -> this.databaseRepository.storeSQL(batch, counter);
+                case MONGODB -> this.databaseRepository.storeMongoDB(batch, counter, this.indexId);
+            }
+        } finally {
+            this.writerPermits.release();
         }
-
-        // Clear the Cached Object
-        this.dataToBeStored.clear();
+        return batch.size();
     }
 
 

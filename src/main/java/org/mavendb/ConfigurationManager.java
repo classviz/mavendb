@@ -33,8 +33,6 @@ class ConfigurationManager {
 
     private static final int MIN_BATCH_SIZE = 100;
     private static final int MAX_BATCH_SIZE = 100_000;
-    private static final int MIN_QUEUE_SIZE = 4;
-    private static final int MAX_QUEUE_SIZE = 1_000;
 
     /**
      * Integer settings: property key, default value, and valid range [min, max].
@@ -47,11 +45,7 @@ class ConfigurationManager {
         SQLITE_BATCH_SIZE("org.mavendb.sqlite.batch.size", 100_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
         MONGODB_BATCH_SIZE("org.mavendb.mongodb.batch.size", 20_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
         /** Maximum concurrent writer threads; 4 gives good throughput without overwhelming the database. */
-        THREAD_POOL_SIZE("org.mavendb.thread.pool.size", 4, 2, 64),
-        /** Store queue size at which submission pauses. */
-        SQL_QUEUE_MAX_SIZE("org.mavendb.sql.queue.max.size", 16, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE),
-        /** Store queue size at which submission resumes; capped at {@link #SQL_QUEUE_MAX_SIZE}. */
-        SQL_QUEUE_RESUME_SIZE("org.mavendb.sql.queue.resume.size", 8, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE);
+        THREAD_POOL_SIZE("org.mavendb.thread.pool.size", 4, 2, 64);
 
         final String key;
         final int defaultValue;
@@ -199,16 +193,6 @@ class ConfigurationManager {
         for (IntSetting setting : IntSetting.values()) {
             this.intSettings.put(setting, parseIntSetting(setting));
         }
-
-        // Resume size must not exceed max size
-        int queueMaxSize = getInt(IntSetting.SQL_QUEUE_MAX_SIZE);
-        int resumeSize = getInt(IntSetting.SQL_QUEUE_RESUME_SIZE);
-        if (resumeSize > queueMaxSize) {
-            LOG.log(Level.WARNING,
-                "SQL queue resume size {0} exceeds max size {1}, using max size",
-                new Object[]{resumeSize, queueMaxSize});
-            this.intSettings.put(IntSetting.SQL_QUEUE_RESUME_SIZE, queueMaxSize);
-        }
    }
 
     /**
@@ -305,23 +289,5 @@ class ConfigurationManager {
      */
     public int getMongodbBatchSize() {
         return getInt(IntSetting.MONGODB_BATCH_SIZE);
-    }
-
-    /**
-     * Get SQL store queue max size from configuration.
-     *
-     * @return SQL queue max size
-     */
-    public int getSqlQueueMaxSize() {
-        return getInt(IntSetting.SQL_QUEUE_MAX_SIZE);
-    }
-
-    /**
-     * Get SQL store queue resume size from configuration.
-     *
-     * @return SQL queue resume size
-     */
-    public int getSqlQueueResumeSize() {
-        return getInt(IntSetting.SQL_QUEUE_RESUME_SIZE);
     }
 }

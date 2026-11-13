@@ -100,9 +100,9 @@ class DatabaseRepository implements AutoCloseable {
     private MongoClient mongoClient;
 
     /**
-     * Constructor for SQL-based repositories (MySQL/PostgreSQL).
+     * Constructor for SQL-based repositories (MySQL, PostgreSQL, SQLite).
      *
-     * @param dbType Database type (MYSQL or PSQL)
+     * @param dbType Database type (MYSQL, PSQL or SQLITE)
      * @param sqlUrl JDBC connection URL
      * @param sqlConnectionProps Connection properties (will be defensively copied)
      */
@@ -139,7 +139,10 @@ class DatabaseRepository implements AutoCloseable {
                 long start = System.currentTimeMillis();
                 LOG.log(Level.INFO, "SQL {0} execution started", script);
                 conn.setAutoCommit(false);
-                new ScriptRunner(conn).runScript(r);
+                ScriptRunner runner = new ScriptRunner(conn);
+                // Fail the import on any script error; the default only prints it to stderr and carries on
+                runner.setStopOnError(true);
+                runner.runScript(r);
                 LOG.log(Level.INFO, "SQL {0} execution finished, execution time {1} ms", new Object[]{script, System.currentTimeMillis() - start});
             }
         } else {
@@ -148,10 +151,11 @@ class DatabaseRepository implements AutoCloseable {
     }
 
     /**
-     * Store SQL records (MySQL/PostgreSQL) to database.
+     * Store SQL records (MySQL, PostgreSQL, SQLite) to database.
      *
      * @param storeList List of records to persist (independent copy, not shared)
      * @param counter Record counter for logging
+     * @throws IllegalStateException if the batch could not be written; the transaction is rolled back
      */
     @SuppressFBWarnings(value = "VA_FORMAT_STRING_USES_NEWLINE", justification = "False positive for Java text blocks")
     protected void storeSQL(List<Document> storeList, final long counter) {
@@ -213,7 +217,8 @@ class DatabaseRepository implements AutoCloseable {
             LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
                     new Object[]{counter, duration.toSeconds(), storeList.size()});
         } catch (SQLException e) {
-            LOG.log(Level.SEVERE, "Error during SQL persist operation for records counter=" + counter, e);
+            // Fail the run instead of silently losing the batch
+            throw new IllegalStateException("SQL persist failed for records counter=" + counter, e);
         } finally {
             // Failure: discard the connection, its state is unknown
             if (conn != null) {
@@ -325,7 +330,10 @@ class DatabaseRepository implements AutoCloseable {
             record.remove(Record.SHA1.getName());
         } else {
             pstmt.setString(SQL_IDX_SHA1, null);
-            LOG.warning("SHA1 value is null or exceeds 40 characters and will be set to null for record " + record);
+            // Publisher uploaded a malformed .sha1 file (e.g. a path with no hash); the raw value stays in the json column
+            LOG.log(Level.INFO, "Malformed SHA1 stored as null for {0}:{1}:{2}: {3}", new Object[]{
+                record.getString(Record.GROUP_ID.getName()), record.getString(Record.ARTIFACT_ID.getName()),
+                record.getString(Record.VERSION.getName()), sha1Value});
         }
 
         pstmt.setString(SQL_IDX_GROUP_ID, record.getString(Record.GROUP_ID.getName()));

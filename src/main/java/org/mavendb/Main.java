@@ -55,7 +55,7 @@ public class Main {
     /**
      * Get the directory which contains the configuration or scripts.
      *
-     * @param dir Directory name, like {@link #DIR_ETC}, {@link MvnScanner#DIR_DB_MYSQL}, {@link MvnScanner#DIR_DB_PSQL}
+     * @param dir Directory name, like {@link #DIR_ETC}, {@link #DIR_LOG}, <code>db/mysql</code>
      * @param file File name, like {@link #CONFIG_FILE}, {@link MvnScanner#DB_CREATE_SQL}
      * @return The full path of the file
      */
