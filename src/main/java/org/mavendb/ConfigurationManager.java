@@ -184,7 +184,7 @@ class ConfigurationManager {
         // No protocol compression: the DB is local, compression only costs CPU on both sides
         mysqlConnectionProps.setProperty("useCompression", "false");
         mysqlConnectionProps.setProperty("useLocalSessionState", "true");
-        mysqlConnectionProps.setProperty("useServerPrepStmts", "true");
+        mysqlConnectionProps.setProperty("useServerPrepStmts", "false");
         mysqlConnectionProps.setProperty("useSSL", "false");
         mysqlConnectionProps.setProperty("zeroDateTimeBehavior", "CONVERT_TO_NULL");
 
