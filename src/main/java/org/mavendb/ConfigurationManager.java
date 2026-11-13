@@ -1,5 +1,7 @@
 package org.mavendb;
 
+import java.util.EnumMap;
+import java.util.Map;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -17,42 +19,52 @@ class ConfigurationManager {
     private static final String CONFIG_MYSQL_URL = "org.mavendb.mysql.url";
     private static final String CONFIG_MYSQL_USER = "org.mavendb.mysql.user";
     private static final String CONFIG_MYSQL_PASSWORD = "org.mavendb.mysql.password";
-    private static final String CONFIG_MYSQL_BATCH_SIZE = "org.mavendb.mysql.batch.size";
     private static final String CONFIG_PSQL_URL = "org.mavendb.psql.url";
     private static final String CONFIG_PSQL_USER = "org.mavendb.psql.user";
     private static final String CONFIG_PSQL_PASSWORD = "org.mavendb.psql.password";
-    private static final String CONFIG_PSQL_BATCH_SIZE = "org.mavendb.psql.batch.size";
     private static final String CONFIG_SQLITE_URL = "org.mavendb.sqlite.url";
-    private static final String CONFIG_SQLITE_BATCH_SIZE = "org.mavendb.sqlite.batch.size";
     private static final String CONFIG_MONGODB_URL = "org.mavendb.mongodb.url";
-    private static final String CONFIG_MONGODB_BATCH_SIZE = "org.mavendb.mongodb.batch.size";
-    private static final String CONFIG_THREAD_POOL_SIZE = "org.mavendb.thread.pool.size";
-    private static final String CONFIG_SQL_QUEUE_MAX_SIZE = "org.mavendb.sql.queue.max.size";
-    private static final String CONFIG_SQL_QUEUE_RESUME_SIZE = "org.mavendb.sql.queue.resume.size";
 
     /* ------- Configuration Defaults ------- */
     protected static final String DATABASE_NAME = "mavendb";
     protected static final String DEFAULT_MYSQL_URL = "jdbc:mysql://localhost:3306/" + DATABASE_NAME;
     protected static final String DEFAULT_PSQL_URL = "jdbc:postgresql://localhost:5432/" + DATABASE_NAME;
     protected static final String DEFAULT_SQLITE_URL = "jdbc:sqlite:" + DATABASE_NAME + ".sqlite";
-    private static final int DEFAULT_MYSQL_BATCH_SIZE = 50000;
-    private static final int DEFAULT_PSQL_BATCH_SIZE = 50000;
-    /**
-     * For SQLite, 100k and 50k has similar performance.
-     */
-    private static final int DEFAULT_SQLITE_BATCH_SIZE = 100000;
-    private static final int DEFAULT_MONGODB_BATCH_SIZE = 20000;
+
     private static final int MIN_BATCH_SIZE = 100;
-    private static final int MAX_BATCH_SIZE = 100000;
-    private static final int MIN_THREAD_POOL_SIZE = 2;
-    /**
-     * Default number of threads in the thread pool, set to 4 to provide good performance without overwhelming the database writting system.
-     */
-    private static final int DEFAULT_THREAD_POOL_SIZE = 4;
-    private static final int DEFAULT_SQL_QUEUE_MAX_SIZE = 16;
-    private static final int DEFAULT_SQL_QUEUE_RESUME_SIZE = 8;
+    private static final int MAX_BATCH_SIZE = 100_000;
     private static final int MIN_QUEUE_SIZE = 4;
-    private static final int MAX_QUEUE_SIZE = 1000;
+    private static final int MAX_QUEUE_SIZE = 1_000;
+
+    /**
+     * Integer settings: property key, default value, and valid range [min, max].
+     * A missing, blank, non-numeric or out-of-range value falls back to the default.
+     */
+    enum IntSetting {
+        MYSQL_BATCH_SIZE("org.mavendb.mysql.batch.size", 50_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
+        PSQL_BATCH_SIZE("org.mavendb.psql.batch.size", 50_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
+        /** For SQLite, 100k and 50k has similar performance. */
+        SQLITE_BATCH_SIZE("org.mavendb.sqlite.batch.size", 100_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
+        MONGODB_BATCH_SIZE("org.mavendb.mongodb.batch.size", 20_000, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
+        /** Maximum concurrent writer threads; 4 gives good throughput without overwhelming the database. */
+        THREAD_POOL_SIZE("org.mavendb.thread.pool.size", 4, 2, 64),
+        /** Store queue size at which submission pauses. */
+        SQL_QUEUE_MAX_SIZE("org.mavendb.sql.queue.max.size", 16, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE),
+        /** Store queue size at which submission resumes; capped at {@link #SQL_QUEUE_MAX_SIZE}. */
+        SQL_QUEUE_RESUME_SIZE("org.mavendb.sql.queue.resume.size", 8, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE);
+
+        final String key;
+        final int defaultValue;
+        final int min;
+        final int max;
+
+        IntSetting(String key, int defaultValue, int min, int max) {
+            this.key = key;
+            this.defaultValue = defaultValue;
+            this.min = min;
+            this.max = max;
+        }
+    }
 
     private final Properties config;
 
@@ -60,13 +72,8 @@ class ConfigurationManager {
     protected final Properties psqlConnectionProps = new Properties();
     protected final Properties sqliteConnectionProps = new Properties();
 
-    private final int cacheMysqlBatchSize;
-    private final int cachePsqlBatchSize;
-    private final int cacheSqliteBatchSize;
-    private final int cacheMongodbBatchSize;
-
-    private final int cacheSqlQueueMaxSize;
-    private final int cacheSqlQueueResumeSize;
+    /** Parsed and validated integer settings, filled once in the constructor. */
+    private final Map<IntSetting, Integer> intSettings = new EnumMap<>(IntSetting.class);
 
 
     /**
@@ -100,66 +107,33 @@ class ConfigurationManager {
     }
 
     /**
-     * Parse and validate batch size from configuration with fallback to default.
+     * Parse and validate an integer setting from configuration, falling back to its default.
      *
-     * @param configKey Configuration property key
-     * @param defaultValue Default batch size if not configured
-     * @return Validated batch size
+     * @param setting Setting to parse
+     * @return Validated value
      */
-    private int parseBatchSize(String configKey, int defaultValue) {
-        String batchSizeStr = config.getProperty(configKey);
-        if (batchSizeStr == null || batchSizeStr.isBlank()) {
-            LOG.log(Level.INFO, "{0} batch size not configured, using default: {1}",
-                    new Object[]{configKey, defaultValue});
-            return defaultValue;
+    private int parseIntSetting(IntSetting setting) {
+        String valueStr = config.getProperty(setting.key);
+        if (valueStr == null || valueStr.isBlank()) {
+            LOG.log(Level.INFO, "{0} not configured, using default: {1}",
+                    new Object[]{setting.key, setting.defaultValue});
+            return setting.defaultValue;
         }
 
         try {
-            int batchSize = Integer.parseInt(batchSizeStr.trim());
-            if (batchSize < MIN_BATCH_SIZE || batchSize > MAX_BATCH_SIZE) {
+            int value = Integer.parseInt(valueStr.trim());
+            if (value < setting.min || value > setting.max) {
                 LOG.log(Level.WARNING,
-                        "{0} batch size {1} is out of valid range [{2}, {3}], using default: {4}",
-                        new Object[]{configKey, batchSize, MIN_BATCH_SIZE, MAX_BATCH_SIZE, defaultValue});
-                return defaultValue;
+                        "{0} value {1} is out of valid range [{2}, {3}], using default: {4}",
+                        new Object[]{setting.key, value, setting.min, setting.max, setting.defaultValue});
+                return setting.defaultValue;
             }
-            LOG.log(Level.INFO, "{0} batch size configured: {1}", new Object[]{configKey, batchSize});
-            return batchSize;
-        } catch (NumberFormatException e) {
-            LOG.log(Level.WARNING, "{0} batch size configuration invalid: {1}, using default: {2}",
-                    new Object[]{configKey, batchSizeStr, defaultValue});
-            return defaultValue;
-        }
-    }
-
-    /**
-     * Parse and validate queue size from configuration with fallback to default.
-     *
-     * @param configKey Configuration property key
-     * @param defaultValue Default queue size if not configured
-     * @return Validated queue size
-     */
-    private int parseQueueSize(String configKey, int defaultValue) {
-        String queueSizeStr = config.getProperty(configKey);
-        if (queueSizeStr == null || queueSizeStr.isBlank()) {
-            LOG.log(Level.INFO, "{0} queue size not configured, using default: {1}",
-                    new Object[]{configKey, defaultValue});
-            return defaultValue;
-        }
-
-        try {
-            int queueSize = Integer.parseInt(queueSizeStr.trim());
-            if (queueSize < MIN_QUEUE_SIZE || queueSize > MAX_QUEUE_SIZE) {
-                LOG.log(Level.WARNING,
-                        "{0} queue size {1} is out of valid range [{2}, {3}], using default: {4}",
-                        new Object[]{configKey, queueSize, MIN_QUEUE_SIZE, MAX_QUEUE_SIZE, defaultValue});
-                return defaultValue;
-            }
-            LOG.log(Level.INFO, "{0} queue size configured: {1}", new Object[]{configKey, queueSize});
-            return queueSize;
-        } catch (NumberFormatException e) {
-            LOG.log(Level.WARNING, "{0} queue size configuration invalid: {1}, using default: {2}",
-                    new Object[]{configKey, queueSizeStr, defaultValue});
-            return defaultValue;
+            LOG.log(Level.INFO, "{0} configured: {1}", new Object[]{setting.key, value});
+            return value;
+        } catch (NumberFormatException _) {
+            LOG.log(Level.WARNING, "{0} configuration invalid: {1}, using default: {2}",
+                    new Object[]{setting.key, valueStr, setting.defaultValue});
+            return setting.defaultValue;
         }
     }
 
@@ -221,52 +195,39 @@ class ConfigurationManager {
         // Increase temp store to memory for faster operations
         sqliteConnectionProps.setProperty("temp_store", "MEMORY");
 
-        // Initialize batch sizes
-        this.cacheMysqlBatchSize = parseBatchSize(CONFIG_MYSQL_BATCH_SIZE, DEFAULT_MYSQL_BATCH_SIZE);
-        this.cachePsqlBatchSize = parseBatchSize(CONFIG_PSQL_BATCH_SIZE, DEFAULT_PSQL_BATCH_SIZE);
-        this.cacheSqliteBatchSize = parseBatchSize(CONFIG_SQLITE_BATCH_SIZE, DEFAULT_SQLITE_BATCH_SIZE);
-        this.cacheMongodbBatchSize = parseBatchSize(CONFIG_MONGODB_BATCH_SIZE, DEFAULT_MONGODB_BATCH_SIZE);
+        // Parse and validate all integer settings once
+        for (IntSetting setting : IntSetting.values()) {
+            this.intSettings.put(setting, parseIntSetting(setting));
+        }
 
-        // Thread pool queue sizes
-        this.cacheSqlQueueMaxSize = parseQueueSize(CONFIG_SQL_QUEUE_MAX_SIZE, DEFAULT_SQL_QUEUE_MAX_SIZE);
-        int resumeSize = parseQueueSize(CONFIG_SQL_QUEUE_RESUME_SIZE, DEFAULT_SQL_QUEUE_RESUME_SIZE);
-        if (resumeSize > this.cacheSqlQueueMaxSize) {
+        // Resume size must not exceed max size
+        int queueMaxSize = getInt(IntSetting.SQL_QUEUE_MAX_SIZE);
+        int resumeSize = getInt(IntSetting.SQL_QUEUE_RESUME_SIZE);
+        if (resumeSize > queueMaxSize) {
             LOG.log(Level.WARNING,
                 "SQL queue resume size {0} exceeds max size {1}, using max size",
-                new Object[]{resumeSize, this.cacheSqlQueueMaxSize});
-            resumeSize = this.cacheSqlQueueMaxSize;
+                new Object[]{resumeSize, queueMaxSize});
+            this.intSettings.put(IntSetting.SQL_QUEUE_RESUME_SIZE, queueMaxSize);
         }
-        this.cacheSqlQueueResumeSize = resumeSize;
    }
 
+    /**
+     * Get a validated integer setting.
+     *
+     * @param setting Setting to get
+     * @return Configured value, or its default
+     */
+    public int getInt(IntSetting setting) {
+        return this.intSettings.get(setting);
+    }
 
     /**
-     * Parse and validate thread pool size from configuration.
+     * Get the maximum number of concurrent writer threads.
      *
-     * @return Validated thread pool size
+     * @return Thread pool size
      */
-    public int parseThreadPoolSize() {
-        String threadPoolStr = config.getProperty(CONFIG_THREAD_POOL_SIZE, String.valueOf(DEFAULT_THREAD_POOL_SIZE));
-        if (threadPoolStr == null || threadPoolStr.isBlank()) {
-            int defaultPoolSize = Runtime.getRuntime().availableProcessors();
-            defaultPoolSize = Math.max(MIN_THREAD_POOL_SIZE, defaultPoolSize);
-            LOG.log(Level.INFO,
-                    "Thread pool size not configured, using default based on available processors: {0}",
-                    defaultPoolSize);
-            return defaultPoolSize;
-        }
-
-        try {
-            int poolSize = Integer.parseInt(threadPoolStr.trim());
-            poolSize = Math.max(MIN_THREAD_POOL_SIZE, poolSize);
-            LOG.log(Level.INFO, "Thread pool size configured: {0}", poolSize);
-            return poolSize;
-        } catch (NumberFormatException e) {
-            int defaultPoolSize = Math.max(MIN_THREAD_POOL_SIZE, Runtime.getRuntime().availableProcessors());
-            LOG.log(Level.WARNING, "Thread pool size configuration invalid: {0}, using default: {1}",
-                    new Object[]{threadPoolStr, defaultPoolSize});
-            return defaultPoolSize;
-        }
+    public int getThreadPoolSize() {
+        return getInt(IntSetting.THREAD_POOL_SIZE);
     }
 
     /**
@@ -316,7 +277,7 @@ class ConfigurationManager {
      * @return MySQL batch size
      */
     public int getMysqlBatchSize() {
-        return this.cacheMysqlBatchSize;
+        return getInt(IntSetting.MYSQL_BATCH_SIZE);
     }
 
     /**
@@ -325,7 +286,7 @@ class ConfigurationManager {
      * @return PostgreSQL batch size
      */
     public int getPsqlBatchSize() {
-        return this.cachePsqlBatchSize;
+        return getInt(IntSetting.PSQL_BATCH_SIZE);
     }
 
     /**
@@ -334,7 +295,7 @@ class ConfigurationManager {
      * @return SQLite batch size
      */
     public int getSqliteBatchSize() {
-        return this.cacheSqliteBatchSize;
+        return getInt(IntSetting.SQLITE_BATCH_SIZE);
     }
 
     /**
@@ -343,7 +304,7 @@ class ConfigurationManager {
      * @return MongoDB batch size
      */
     public int getMongodbBatchSize() {
-        return this.cacheMongodbBatchSize;
+        return getInt(IntSetting.MONGODB_BATCH_SIZE);
     }
 
     /**
@@ -352,7 +313,7 @@ class ConfigurationManager {
      * @return SQL queue max size
      */
     public int getSqlQueueMaxSize() {
-        return this.cacheSqlQueueMaxSize;
+        return getInt(IntSetting.SQL_QUEUE_MAX_SIZE);
     }
 
     /**
@@ -361,6 +322,6 @@ class ConfigurationManager {
      * @return SQL queue resume size
      */
     public int getSqlQueueResumeSize() {
-        return this.cacheSqlQueueResumeSize;
+        return getInt(IntSetting.SQL_QUEUE_RESUME_SIZE);
     }
 }

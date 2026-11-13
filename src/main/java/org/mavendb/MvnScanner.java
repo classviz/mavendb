@@ -185,7 +185,7 @@ class MvnScanner {
         } else {
             // Core threads must equal max threads: with an unbounded LinkedBlockingQueue,
             // ThreadPoolExecutor never grows beyond the core size, so a smaller core would cap the writers
-            maxConcurrentThreads = configMgr.parseThreadPoolSize();
+            maxConcurrentThreads = configMgr.getThreadPoolSize();
             executorCoreThreads = maxConcurrentThreads;
         }
 
@@ -202,16 +202,13 @@ class MvnScanner {
             Thread.ofVirtual().factory()
         );
 
-        if (this.dbType == DatabaseType.MYSQL) {
-            this.databaseRepository = new DatabaseRepository(DatabaseType.MYSQL, configMgr.getMysqlUrl(), configMgr.mysqlConnectionProps);
-            this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
-        } else if (this.dbType == DatabaseType.MONGODB) {
-            this.databaseRepository = new DatabaseRepository(configMgr.getMongodbUrl());
-        } else if (this.dbType == DatabaseType.PSQL) {
-            this.databaseRepository = new DatabaseRepository(DatabaseType.PSQL, configMgr.getPsqlUrl(), configMgr.psqlConnectionProps);
-            this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
-        } else if (this.dbType == DatabaseType.SQLITE) {
-            this.databaseRepository = new DatabaseRepository(DatabaseType.SQLITE, configMgr.getSqliteUrl(), configMgr.sqliteConnectionProps);
+        this.databaseRepository = switch (this.dbType) {
+            case MYSQL -> new DatabaseRepository(DatabaseType.MYSQL, configMgr.getMysqlUrl(), configMgr.mysqlConnectionProps);
+            case PSQL -> new DatabaseRepository(DatabaseType.PSQL, configMgr.getPsqlUrl(), configMgr.psqlConnectionProps);
+            case SQLITE -> new DatabaseRepository(DatabaseType.SQLITE, configMgr.getSqliteUrl(), configMgr.sqliteConnectionProps);
+            case MONGODB -> new DatabaseRepository(configMgr.getMongodbUrl());
+        };
+        if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
             this.databaseRepository.executeSQLScript(DB_CREATE_SQL);
         }
 
@@ -354,8 +351,8 @@ class MvnScanner {
                         continue;
                     }
                     VersionAnalyser analyzedVersion = new VersionAnalyser(versionString);
-                    jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.getMajorVersion());
-                    jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.getVersionSeq());
+                    jsonDoc.append(VersionAnalyser.KEY_MAJOR_VERSION, analyzedVersion.majorVersion());
+                    jsonDoc.append(VersionAnalyser.KEY_VERSION_SEQ, analyzedVersion.versionSeq());
 
                     // Calculate file name
                     String classifier = record.getString(Record.CLASSIFIER);
@@ -390,7 +387,7 @@ class MvnScanner {
                 LOG.info("Current thread queue size is " + this.storeExecutor.getQueue().size());
                 try {
                     Thread.sleep(200);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }
@@ -410,45 +407,30 @@ class MvnScanner {
             return;
         }
 
-        if (DatabaseRepository.SUPPORTED_SQL_DB_TYPES.contains(this.dbType)) {
-            int batchSize;
-            if (this.dbType == DatabaseType.MYSQL) {
-                batchSize = this.configMgr.getMysqlBatchSize();
-            } else if (this.dbType == DatabaseType.PSQL) {
-                batchSize = this.configMgr.getPsqlBatchSize();
-            } else {
-                batchSize = this.configMgr.getSqliteBatchSize();
-            }
+        int batchSize = switch (this.dbType) {
+            case MYSQL -> this.configMgr.getMysqlBatchSize();
+            case PSQL -> this.configMgr.getPsqlBatchSize();
+            case SQLITE -> this.configMgr.getSqliteBatchSize();
+            case MONGODB -> this.configMgr.getMongodbBatchSize();
+        };
 
-            // Save batchSize records as a group,
-            // Or when force save, save it no matter of the size
-            if (this.dataToBeStored.size() >= batchSize || force) {
-                this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
-
-                // Submit store operation to virtual thread for asynchronous execution.
-                List<Document> docsToStore = List.copyOf(this.dataToBeStored);
-                this.storeExecutor.submit(() -> {
-                    this.databaseRepository.storeSQL(docsToStore, counter);
-                });
-
-                // Clear the Cached Object
-                this.dataToBeStored.clear();
-            }
-        } else if (this.dbType == DatabaseType.MONGODB) {
-            // Save mongodbBatchSize records as a group,
-            // Or when force save, save it no matter of the size
-            if (this.dataToBeStored.size() >= this.configMgr.getMongodbBatchSize() || force) {
-                this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
-
-                List<Document> docsToStore = List.copyOf(this.dataToBeStored);
-                this.storeExecutor.submit(() -> {
-                    this.databaseRepository.storeMongoDB(docsToStore, counter, this.indexId);
-                });
-
-                // Clear the Cached Object
-                this.dataToBeStored.clear();
-            }
+        // Save batchSize records as a group,
+        // Or when force save, save it no matter of the size
+        if (this.dataToBeStored.size() < batchSize && !force) {
+            return;
         }
+
+        this.avoidOverload(this.configMgr.getSqlQueueMaxSize(), this.configMgr.getSqlQueueResumeSize());
+
+        // Submit store operation to virtual thread for asynchronous execution.
+        List<Document> docsToStore = List.copyOf(this.dataToBeStored);
+        switch (this.dbType) {
+            case MYSQL, PSQL, SQLITE -> this.storeExecutor.submit(() -> this.databaseRepository.storeSQL(docsToStore, counter));
+            case MONGODB -> this.storeExecutor.submit(() -> this.databaseRepository.storeMongoDB(docsToStore, counter, this.indexId));
+        }
+
+        // Clear the Cached Object
+        this.dataToBeStored.clear();
     }
 
 

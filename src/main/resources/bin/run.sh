@@ -33,6 +33,15 @@ echo ""
 
 
 # Set JAVA_OPTS
+#
+# -XX:+UseCompactObjectHeaders (JDK 25, JEP 519)
+#   Shrinks object headers from 12 to 8 bytes, lowers heap use for the millions of small record objects.
+#
+# JFR method-timing (JDK 25, JEP 520)
+#   Records invocation count and min/avg/max time of the database write methods. View it after the run with:
+#     jfr view method-timing ../log/profile.jfr
+#   The value is single-quoted because ';' separates the methods and RUN_CMD goes through eval.
+#   Do not add per-record methods (like bindSQLParameters): timing every call adds overhead.
 
 JAVA_OPTS=" \
  -showversion \
@@ -49,8 +58,9 @@ JAVA_OPTS=" \
  -XX:+PrintConcurrentLocks \
  -XX:+PrintNMTStatistics \
  -XX:+DebugNonSafepoints \
+ -XX:+UseCompactObjectHeaders \
  -XX:FlightRecorderOptions=repository=../log \
- -XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile \
+ '-XX:StartFlightRecording=disk=true,dumponexit=true,filename=../log/profile.jfr,name=Profiling,settings=profile,method-timing=org.mavendb.DatabaseRepository::storeSQL;org.mavendb.DatabaseRepository::storeMongoDB;org.mavendb.DatabaseRepository::executeSQLScript;org.mavendb.DatabaseRepository::createIndexesMongoDB' \
 "
 
 RUN_CMD="java $JAVA_OPTS -Xmx32g -server -jar $BASEDIR/../mavendb.jar -f $1 -d $2"

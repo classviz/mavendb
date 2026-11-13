@@ -381,28 +381,21 @@ class DatabaseRepository implements AutoCloseable {
         }
 
         // Handle JSON field with database-specific types
-        if (dbType == DatabaseType.MYSQL) {
-            if (record.size() == 0) {
-                pstmt.setString(SQL_IDX_JSON, null);
-            } else {
-                pstmt.setString(SQL_IDX_JSON, record.toJson());
+        String json = record.isEmpty() ? null : record.toJson();
+        switch (this.dbType) {
+            // MySQL JSON column, SQLite stores JSON as TEXT
+            case MYSQL, SQLITE -> pstmt.setString(SQL_IDX_JSON, json);
+            case PSQL -> {
+                if (json == null) {
+                    pstmt.setObject(SQL_IDX_JSON, null, java.sql.Types.OTHER);
+                } else {
+                    PGobject jsonObject = new PGobject();
+                    jsonObject.setType("jsonb");
+                    jsonObject.setValue(json);
+                    pstmt.setObject(SQL_IDX_JSON, jsonObject);
+                }
             }
-        } else if (dbType == DatabaseType.PSQL) {
-            if (record.size() == 0) {
-                pstmt.setObject(SQL_IDX_JSON, null, java.sql.Types.OTHER);
-            } else {
-                PGobject jsonObject = new PGobject();
-                jsonObject.setType("jsonb");
-                jsonObject.setValue(record.toJson());
-                pstmt.setObject(SQL_IDX_JSON, jsonObject);
-            }
-        } else if (dbType == DatabaseType.SQLITE) {
-            // SQLite stores JSON as TEXT
-            if (record.size() == 0) {
-                pstmt.setString(SQL_IDX_JSON, null);
-            } else {
-                pstmt.setString(SQL_IDX_JSON, record.toJson());
-            }
+            case MONGODB -> throw new IllegalStateException("SQL parameter binding is not used for MongoDB");
         }
     }
 

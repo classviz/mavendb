@@ -121,7 +121,7 @@ public class Main {
         DatabaseType dbType;
         try {
             dbType = Enum.valueOf(DatabaseType.class, dbTypeString);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             LOG.log(Level.SEVERE, "Unsupported database type: " + dbTypeString);
             Main.printHelp();
             return;

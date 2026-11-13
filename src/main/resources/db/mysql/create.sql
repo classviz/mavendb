@@ -11,8 +11,8 @@ DROP TABLE IF exists `gav`;
 CREATE TABLE         `gav` (
   `seqid`                       bigint                                 NOT NULL COMMENT 'Squence ID',
 
-  `major_version`                   int                            DEFAULT NULL COMMENT 'VersionAnalyser.getMajorVersion()',
-  `version_seq`                  bigint                                NOT NULL COMMENT 'VersionAnalyser.getVersionSeq()',
+  `major_version`                   int                            DEFAULT NULL COMMENT 'VersionAnalyser.majorVersion()',
+  `version_seq`                  bigint                                NOT NULL COMMENT 'VersionAnalyser.versionSeq()',
 
   `record_modified`              bigint                            DEFAULT NULL COMMENT 'Record.recordModified',
   `file_modified`                bigint                            DEFAULT NULL COMMENT 'Record.fileModified',
