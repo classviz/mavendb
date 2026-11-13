@@ -7,9 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.Semaphore;
@@ -86,14 +86,32 @@ class MvnScanner {
 
     /**
      * Record sequence, unique across all chunks: it is the primary key (seqid / _id).
-     * Only touched by the scanning thread (the stream before {@code mapConcurrent} is sequential).
+     * Assigned in index order on the scanning thread, before the records are handed to the conversion threads.
      */
     private long recordSeq;
 
     /**
      * Track the max length of string values for each key for logging and potential future optimizations.
+     * Each conversion task tracks its own batch and merges it in once, see {@link #convertBatch(List)}.
      */
-    private Map<String, Integer> maxLengthTracker = new ConcurrentSkipListMap<>();
+    private final Map<String, Integer> maxLengthTracker = new ConcurrentSkipListMap<>();
+
+    /**
+     * One raw index record with its sequence number.
+     */
+    private record RawRecord(long seq, Map<String, String> data) {
+    }
+
+    /**
+     * One converted batch, ready to write: documents for MongoDB, prepared rows for the SQL databases.
+     *
+     * @param counter Sequence number of the last record, for logging
+     * @param size Number of records to write
+     * @param documents MongoDB documents, <code>null</code> for SQL databases
+     * @param rows SQL rows, <code>null</code> for MongoDB
+     */
+    private record Batch(long counter, int size, List<Document> documents, List<DatabaseRepository.SqlRow> rows) {
+    }
 
     /**
      * Private constructor - use {@link #create(String, DatabaseType)} factory method instead.
@@ -223,17 +241,21 @@ class MvnScanner {
      *
      * <p>Pipeline (Java 24+ stream gatherers, JEP 485):
      * <pre>
-     *   chunks → records → Document → windowFixed(batchSize) → mapConcurrent(writers + 1, storeBatch)
+     *   chunks → raw records (seq assigned) → windowFixed(batchSize)
+     *          → mapConcurrent(converters, convertBatch) → mapConcurrent(writers + 1, storeBatch)
      * </pre>
-     * The stream up to {@code windowFixed} runs on this thread; {@code storeBatch} runs on virtual threads.
+     * Reading and decoding the index is sequential and runs on this thread, which also assigns the
+     * record sequence in index order. Expanding records, building documents and preparing SQL rows is
+     * about two thirds of the CPU work, so it runs on {@code converters} virtual threads.
+     * {@code mapConcurrent} keeps the input order, so batches still reach the writers in sequence order.
      *
      * <p>Why {@code writers + 1} tasks plus {@link #writerPermits}: {@code mapConcurrent} blocks the scanning
      * thread whenever all of its task slots are busy. With exactly {@code writers} slots, the next batch
-     * could only be read after a write finished, leaving a writer idle while it is read; for SQLite (one writer)
-     * reading and writing would not overlap at all. The extra slot holds one ready batch that waits for a permit,
-     * so the writers stay busy while the following batch is read.
+     * could only be handed over after a write finished, leaving a writer idle; for SQLite (one writer)
+     * converting and writing would not overlap at all. The extra slot holds one ready batch that waits for a
+     * permit, so the writers stay busy. With one writer this also keeps the SQLite writes in sequence order.
      *
-     * <p>Memory: at most {@code writers + 2} batches (writing, one ready, one being filled).
+     * <p>Memory: at most {@code converters + writers + 3} batches (being filled, converting, writing, one ready).
      * A failed batch throws out of this method; the other in-flight batches are cancelled.
      *
      * @param writers Maximum number of batches written at the same time
@@ -260,14 +282,18 @@ class MvnScanner {
                 case MONGODB -> this.configMgr.getMongodbBatchSize();
             };
 
+            // Conversion is CPU bound; 2-8 threads keep up with the single decoding thread
+            int converters = Math.clamp(Runtime.getRuntime().availableProcessors() / 2, 2, 8);
+            LOG.log(Level.INFO, "Concurrent batch converters: {0}", converters);
+
             this.recordSeq = 0;
             long stored;
             try (Stream<ChunkReader> chunks = StreamSupport.stream(indexReader.spliterator(), false)) {
                 stored = chunks
                     .flatMap(this::chunkRecords)
-                    .map(this::toDocument)
-                    .filter(Objects::nonNull)
                     .gather(Gatherers.windowFixed(batchSize))
+                    .gather(Gatherers.mapConcurrent(converters, this::convertBatch))
+                    .filter(batch -> batch.size() > 0)
                     .gather(Gatherers.mapConcurrent(writers + 1, this::storeBatch))
                     .mapToLong(Integer::longValue)
                     .sum();
@@ -277,16 +303,15 @@ class MvnScanner {
     }
 
     /**
-     * Stream the expanded records of one chunk; the chunk is closed when its stream is consumed.
+     * Stream the raw records of one chunk, numbered in index order; the chunk is closed when its stream is consumed.
      */
-    private Stream<Record> chunkRecords(ChunkReader chunkReader) {
+    private Stream<RawRecord> chunkRecords(ChunkReader chunkReader) {
         LOG.log(Level.INFO,"  chunkName=" + chunkReader.getName());
         LOG.log(Level.INFO,"  chunkVersion=" + chunkReader.getVersion());
         LOG.log(Level.INFO,"  chunkPublished=" + chunkReader.getTimestamp());
 
-        RecordExpander recordExpander = new RecordExpander();
         return StreamSupport.stream(chunkReader.spliterator(), false)
-            .map(recordExpander)
+            .map(data -> new RawRecord(++this.recordSeq, data))
             .onClose(() -> {
                 try {
                     chunkReader.close();
@@ -297,13 +322,55 @@ class MvnScanner {
     }
 
     /**
+     * Convert one batch of raw records. Runs on a virtual thread started by {@code mapConcurrent}.
+     *
+     * @param raws Raw records, in sequence order
+     * @return Batch ready to write; empty when every record was skipped
+     */
+    private Batch convertBatch(List<RawRecord> raws) {
+        // RecordExpander has no state, one per batch keeps it obviously thread confined
+        RecordExpander recordExpander = new RecordExpander();
+        Map<String, Integer> maxLengths = new HashMap<>();
+
+        List<Document> documents = new ArrayList<>(raws.size());
+        for (RawRecord raw : raws) {
+            Document document = toDocument(raw.seq(), recordExpander.apply(raw.data()), maxLengths);
+            if (document != null) {
+                documents.add(document);
+            }
+        }
+        maxLengths.forEach((key, length) -> this.maxLengthTracker.merge(key, length, Integer::max));
+
+        if (documents.isEmpty()) {
+            return new Batch(0, 0, null, null);
+        }
+        // Read before preparing SQL rows: that removes fields from the documents
+        long counter = documents.getLast().getLong(DatabaseRepository.JSON_FIELD_ID);
+        if (this.dbType == DatabaseType.MONGODB) {
+            return new Batch(counter, documents.size(), documents, null);
+        }
+
+        List<DatabaseRepository.SqlRow> rows = new ArrayList<>(documents.size());
+        try {
+            for (Document document : documents) {
+                rows.add(this.databaseRepository.toSQLRow(document));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("SQL row preparation failed for records counter=" + counter, e);
+        }
+        return new Batch(counter, rows.size(), null, rows);
+    }
+
+    /**
      * Convert one index record to a JSON document.
      *
+     * @param seq Record sequence number, the primary key
+     * @param record Expanded index record
+     * @param maxLengths Max string length per key, for this batch
      * @return The document, or <code>null</code> when the record has no version and is skipped
      */
-    private Document toDocument(Record record) {
-        this.recordSeq++;
-        Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, this.recordSeq);
+    private Document toDocument(long seq, Record record, Map<String, Integer> maxLengths) {
+        Document jsonDoc = new Document(DatabaseRepository.JSON_FIELD_ID, seq);
         record.getExpanded().forEach((k, v) -> {
             if (k.getProto().equals(String.class)) {
                 String value = strip(record.getString(k));
@@ -311,7 +378,7 @@ class MvnScanner {
 
                 // Track the maximum length of string values for each key for logging and potential future optimizations
                 if (value != null) {
-                    maxLengthTracker.merge(k.getName(), value.length(), Integer::max);
+                    maxLengths.merge(k.getName(), value.length(), Integer::max);
                 }
             } else if (k.getProto().equals(String[].class)) {
                 List<String> stringList = new ArrayList<>();
@@ -356,23 +423,21 @@ class MvnScanner {
     /**
      * Write one batch to the database. Runs on a virtual thread started by {@code mapConcurrent}.
      *
-     * @param batch Documents to write
-     * @return Number of documents written
+     * @param batch Converted batch to write
+     * @return Number of records written
      */
-    private Integer storeBatch(List<Document> batch) {
-        // Read before storing: binding the SQL parameters removes fields from the documents
-        long counter = batch.getLast().getLong(DatabaseRepository.JSON_FIELD_ID);
+    private Integer storeBatch(Batch batch) {
         try {
             this.writerPermits.acquire();
         } catch (InterruptedException e) {
             // Cancelled because another batch failed
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting to store records counter=" + counter, e);
+            throw new IllegalStateException("Interrupted while waiting to store records counter=" + batch.counter(), e);
         }
         try {
             switch (this.dbType) {
-                case MYSQL, PSQL, SQLITE -> this.databaseRepository.storeSQL(batch, counter);
-                case MONGODB -> this.databaseRepository.storeMongoDB(batch, counter, this.indexId);
+                case MYSQL, PSQL, SQLITE -> this.databaseRepository.storeSQL(batch.rows(), batch.counter());
+                case MONGODB -> this.databaseRepository.storeMongoDB(batch.documents(), batch.counter(), this.indexId);
             }
         } finally {
             this.writerPermits.release();

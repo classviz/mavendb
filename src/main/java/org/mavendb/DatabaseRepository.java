@@ -151,12 +151,12 @@ class DatabaseRepository implements AutoCloseable {
     /**
      * Store SQL records (MySQL, PostgreSQL, SQLite) to database.
      *
-     * @param storeList List of records to persist (independent copy, not shared)
+     * @param rows Prepared rows to persist, see {@link #toSQLRow(Document)}
      * @param counter Record counter for logging
      * @throws IllegalStateException if the batch could not be written; the transaction is rolled back
      */
     @SuppressFBWarnings(value = "VA_FORMAT_STRING_USES_NEWLINE", justification = "False positive for Java text blocks")
-    protected void storeSQL(List<Document> storeList, final long counter) {
+    protected void storeSQL(List<SqlRow> rows, final long counter) {
         Connection conn = null;
         try {
             conn = borrowConnection();
@@ -198,8 +198,8 @@ class DatabaseRepository implements AutoCloseable {
             """.formatted(tableName);
 
             try (PreparedStatement pstmt = conn.prepareStatement(sqlGav)) {
-                for (Document record : storeList) {
-                    bindSQLParameters(pstmt, record);
+                for (SqlRow row : rows) {
+                    row.bindTo(pstmt);
                     pstmt.addBatch();
                 }
                 // Execute remaining batch
@@ -213,7 +213,7 @@ class DatabaseRepository implements AutoCloseable {
 
             Duration duration = Duration.between(begin, LocalDateTime.now());
             LOG.log(Level.INFO, "persist finished for records counter={0} in seconds={1}, batchSize={2}",
-                    new Object[]{counter, duration.toSeconds(), storeList.size()});
+                    new Object[]{counter, duration.toSeconds(), rows.size()});
         } catch (SQLException e) {
             // Fail the run instead of silently losing the batch
             throw new IllegalStateException("SQL persist failed for records counter=" + counter, e);
@@ -291,94 +291,98 @@ class DatabaseRepository implements AutoCloseable {
     }
 
     /**
-     * Bind Maven record parameters to prepared statement with database-specific handling.
+     * Prepare the gav row parameters of one record, with database-specific handling.
      *
-     * @param pstmt Prepared statement
-     * @param record Maven record to bind
-     * @throws SQLException if binding fails
+     * <p>Thread safe: called on the conversion threads, so this work stays off the writer.
+     * Removes the bound fields from the record; what remains is stored in the json column.
+     *
+     * @param record Maven record to convert
+     * @return Row parameters, bound later by {@link #storeSQL(List, long)}
+     * @throws SQLException if a parameter value cannot be created
      */
-    protected void bindSQLParameters(PreparedStatement pstmt, Document record) throws SQLException {
-        pstmt.setLong(SQL_IDX_SEQID, record.getLong(JSON_FIELD_ID));
+    protected SqlRow toSQLRow(Document record) throws SQLException {
+        SqlRow row = new SqlRow();
+        row.setLong(SQL_IDX_SEQID, record.getLong(JSON_FIELD_ID));
 
-        pstmt.setInt(SQL_IDX_MAJOR_VERSION, record.getInteger(VersionAnalyser.KEY_MAJOR_VERSION));
+        row.setInt(SQL_IDX_MAJOR_VERSION, record.getInteger(VersionAnalyser.KEY_MAJOR_VERSION));
         record.remove(VersionAnalyser.KEY_MAJOR_VERSION);
-        pstmt.setLong(SQL_IDX_VERSION_SEQ, record.getLong(VersionAnalyser.KEY_VERSION_SEQ));
+        row.setLong(SQL_IDX_VERSION_SEQ, record.getLong(VersionAnalyser.KEY_VERSION_SEQ));
         record.remove(VersionAnalyser.KEY_VERSION_SEQ);
 
-        pstmt.setObject(SQL_IDX_RECORD_MODIFIED, record.getLong(Record.REC_MODIFIED.getName()));
+        row.setObject(SQL_IDX_RECORD_MODIFIED, record.getLong(Record.REC_MODIFIED.getName()));
         record.remove(Record.REC_MODIFIED.getName());
-        pstmt.setObject(SQL_IDX_FILE_MODIFIED, record.getLong(Record.FILE_MODIFIED.getName()));
+        row.setObject(SQL_IDX_FILE_MODIFIED, record.getLong(Record.FILE_MODIFIED.getName()));
         record.remove(Record.FILE_MODIFIED.getName());
-        pstmt.setObject(SQL_IDX_FILE_SIZE, record.getLong(Record.FILE_SIZE.getName()));
+        row.setObject(SQL_IDX_FILE_SIZE, record.getLong(Record.FILE_SIZE.getName()));
         record.remove(Record.FILE_SIZE.getName());
 
-        pstmt.setBoolean(SQL_IDX_HAS_SIGNATURE, record.getBoolean(Record.HAS_SIGNATURE.getName()));
+        row.setBoolean(SQL_IDX_HAS_SIGNATURE, record.getBoolean(Record.HAS_SIGNATURE.getName()));
         record.remove(Record.HAS_SIGNATURE.getName());
-        pstmt.setBoolean(SQL_IDX_HAS_SOURCES, record.getBoolean(Record.HAS_SOURCES.getName()));
+        row.setBoolean(SQL_IDX_HAS_SOURCES, record.getBoolean(Record.HAS_SOURCES.getName()));
         record.remove(Record.HAS_SOURCES.getName());
-        pstmt.setBoolean(SQL_IDX_HAS_JAVADOC, record.getBoolean(Record.HAS_JAVADOC.getName()));
+        row.setBoolean(SQL_IDX_HAS_JAVADOC, record.getBoolean(Record.HAS_JAVADOC.getName()));
         record.remove(Record.HAS_JAVADOC.getName());
 
         // Do not store SHA1 field if it exceeds maximum length of 40
         String sha1Value = record.getString(Record.SHA1.getName());
         if (sha1Value == null) {
-            pstmt.setString(SQL_IDX_SHA1, null);
+            row.setString(SQL_IDX_SHA1, null);
         } else if (sha1Value.length() <= SHA1_MAX_LENGTH) {
-            pstmt.setString(SQL_IDX_SHA1, sha1Value);
+            row.setString(SQL_IDX_SHA1, sha1Value);
             record.remove(Record.SHA1.getName());
         } else {
-            pstmt.setString(SQL_IDX_SHA1, null);
+            row.setString(SQL_IDX_SHA1, null);
             // Publisher uploaded a malformed .sha1 file (e.g. a path with no hash); the raw value stays in the json column
             LOG.log(Level.INFO, "Malformed SHA1 stored as null for {0}:{1}:{2}: {3}", new Object[]{
                 record.getString(Record.GROUP_ID.getName()), record.getString(Record.ARTIFACT_ID.getName()),
                 record.getString(Record.VERSION.getName()), sha1Value});
         }
 
-        pstmt.setString(SQL_IDX_GROUP_ID, record.getString(Record.GROUP_ID.getName()));
+        row.setString(SQL_IDX_GROUP_ID, record.getString(Record.GROUP_ID.getName()));
         record.remove(Record.GROUP_ID.getName());
         String artifactId = record.getString(Record.ARTIFACT_ID.getName());
-        pstmt.setString(SQL_IDX_ARTIFACT_ID, artifactId);
+        row.setString(SQL_IDX_ARTIFACT_ID, artifactId);
         record.remove(Record.ARTIFACT_ID.getName());
         String artifactVersion = record.getString(Record.VERSION.getName());
-        pstmt.setString(SQL_IDX_ARTIFACT_VERSION, artifactVersion);
+        row.setString(SQL_IDX_ARTIFACT_VERSION, artifactVersion);
         record.remove(Record.VERSION.getName());
 
         String classifier = record.getString(Record.CLASSIFIER.getName());
-        pstmt.setString(SQL_IDX_CLASSIFIER, classifier);
+        row.setString(SQL_IDX_CLASSIFIER, classifier);
         record.remove(Record.CLASSIFIER.getName());
-        pstmt.setString(SQL_IDX_PACKAGING, record.getString(Record.PACKAGING.getName()));
+        row.setString(SQL_IDX_PACKAGING, record.getString(Record.PACKAGING.getName()));
         record.remove(Record.PACKAGING.getName());
         String fileExtension = record.getString(Record.FILE_EXTENSION.getName());
-        pstmt.setString(SQL_IDX_FILE_EXTENSION, fileExtension);
+        row.setString(SQL_IDX_FILE_EXTENSION, fileExtension);
         record.remove(Record.FILE_EXTENSION.getName());
 
-        pstmt.setString(SQL_IDX_FILE_NAME, record.getString(JSON_FIELD_FILE_NAME));
+        row.setString(SQL_IDX_FILE_NAME, record.getString(JSON_FIELD_FILE_NAME));
         record.remove(JSON_FIELD_FILE_NAME);
 
-        pstmt.setString(SQL_IDX_NAME, record.getString(Record.NAME.getName()));
+        row.setString(SQL_IDX_NAME, record.getString(Record.NAME.getName()));
         record.remove(Record.NAME.getName());
-        pstmt.setString(SQL_IDX_DESCRIPTION, record.getString(Record.DESCRIPTION.getName()));
+        row.setString(SQL_IDX_DESCRIPTION, record.getString(Record.DESCRIPTION.getName()));
         record.remove(Record.DESCRIPTION.getName());
 
-        pstmt.setString(SQL_IDX_BUNDLE_DESCRIPTION, record.getString(Record.OSGI_BUNDLE_DESCRIPTION.getName()));
+        row.setString(SQL_IDX_BUNDLE_DESCRIPTION, record.getString(Record.OSGI_BUNDLE_DESCRIPTION.getName()));
         record.remove(Record.OSGI_BUNDLE_DESCRIPTION.getName());
-        pstmt.setString(SQL_IDX_BUNDLE_DOCURL, record.getString(Record.OSGI_EXPORT_DOCURL.getName()));
+        row.setString(SQL_IDX_BUNDLE_DOCURL, record.getString(Record.OSGI_EXPORT_DOCURL.getName()));
         record.remove(Record.OSGI_EXPORT_DOCURL.getName());
-        pstmt.setString(SQL_IDX_BUNDLE_LICENSE, record.getString(Record.OSGI_BUNDLE_LICENSE.getName()));
+        row.setString(SQL_IDX_BUNDLE_LICENSE, record.getString(Record.OSGI_BUNDLE_LICENSE.getName()));
         record.remove(Record.OSGI_BUNDLE_LICENSE.getName());
-        pstmt.setString(SQL_IDX_BUNDLE_NAME, record.getString(Record.OSGI_BUNDLE_NAME.getName()));
+        row.setString(SQL_IDX_BUNDLE_NAME, record.getString(Record.OSGI_BUNDLE_NAME.getName()));
         record.remove(Record.OSGI_BUNDLE_NAME.getName());
-        pstmt.setString(SQL_IDX_BUNDLE_SYMBOLICNAME, record.getString(Record.OSGI_BUNDLE_SYMBOLIC_NAME.getName()));
+        row.setString(SQL_IDX_BUNDLE_SYMBOLICNAME, record.getString(Record.OSGI_BUNDLE_SYMBOLIC_NAME.getName()));
         record.remove(Record.OSGI_BUNDLE_SYMBOLIC_NAME.getName());
-        pstmt.setString(SQL_IDX_BUNDLE_VERSION, record.getString(Record.OSGI_BUNDLE_VERSION.getName()));
+        row.setString(SQL_IDX_BUNDLE_VERSION, record.getString(Record.OSGI_BUNDLE_VERSION.getName()));
         record.remove(Record.OSGI_BUNDLE_VERSION.getName());
-        pstmt.setString(SQL_IDX_EXPORT_PACKAGE, record.getString(Record.OSGI_EXPORT_PACKAGE.getName()));
+        row.setString(SQL_IDX_EXPORT_PACKAGE, record.getString(Record.OSGI_EXPORT_PACKAGE.getName()));
         record.remove(Record.OSGI_EXPORT_PACKAGE.getName());
-        pstmt.setString(SQL_IDX_IMPORT_PACKAGE, record.getString(Record.OSGI_IMPORT_PACKAGE.getName()));
+        row.setString(SQL_IDX_IMPORT_PACKAGE, record.getString(Record.OSGI_IMPORT_PACKAGE.getName()));
         record.remove(Record.OSGI_IMPORT_PACKAGE.getName());
-        pstmt.setString(SQL_IDX_REQUIRE_BUNDLE, record.getString(Record.OSGI_REQUIRE_BUNDLE.getName()));
+        row.setString(SQL_IDX_REQUIRE_BUNDLE, record.getString(Record.OSGI_REQUIRE_BUNDLE.getName()));
         record.remove(Record.OSGI_REQUIRE_BUNDLE.getName());
-        pstmt.setString(SQL_IDX_EXPORT_SERVICE, record.getString(Record.OSGI_EXPORT_SERVICE.getName()));
+        row.setString(SQL_IDX_EXPORT_SERVICE, record.getString(Record.OSGI_EXPORT_SERVICE.getName()));
         record.remove(Record.OSGI_EXPORT_SERVICE.getName());
 
         // Remove _id from json if it's the only field left
@@ -390,19 +394,20 @@ class DatabaseRepository implements AutoCloseable {
         String json = record.isEmpty() ? null : record.toJson();
         switch (this.dbType) {
             // MySQL JSON column, SQLite stores JSON as TEXT
-            case MYSQL, SQLITE -> pstmt.setString(SQL_IDX_JSON, json);
+            case MYSQL, SQLITE -> row.setString(SQL_IDX_JSON, json);
             case PSQL -> {
                 if (json == null) {
-                    pstmt.setObject(SQL_IDX_JSON, null, java.sql.Types.OTHER);
+                    row.setObject(SQL_IDX_JSON, null, java.sql.Types.OTHER);
                 } else {
                     PGobject jsonObject = new PGobject();
                     jsonObject.setType("jsonb");
                     jsonObject.setValue(json);
-                    pstmt.setObject(SQL_IDX_JSON, jsonObject);
+                    row.setObject(SQL_IDX_JSON, jsonObject);
                 }
             }
             case MONGODB -> throw new IllegalStateException("SQL parameter binding is not used for MongoDB");
         }
+        return row;
     }
 
     /**
@@ -432,5 +437,70 @@ class DatabaseRepository implements AutoCloseable {
             Indexes.ascending(VersionAnalyser.KEY_MAJOR_VERSION)
         ));
         LOG.log(Level.INFO, "MongoDB createIndex finished, execution time {0} ms", new Object[]{System.currentTimeMillis() - start});
+    }
+
+    /**
+     * Parameter values of one gav row: the JDBC setter calls are recorded on a conversion thread,
+     * and replayed on the writer's {@link PreparedStatement} with the same setter and value types.
+     */
+    static final class SqlRow {
+        private static final byte STRING = 0;
+        private static final byte INT = 1;
+        private static final byte LONG = 2;
+        private static final byte BOOLEAN = 3;
+        private static final byte OBJECT = 4;
+        private static final byte OBJECT_TYPED = 5;
+
+        private final Object[] values = new Object[SQL_IDX_JSON];
+        private final byte[] kinds = new byte[SQL_IDX_JSON];
+        private final int[] sqlTypes = new int[SQL_IDX_JSON];
+
+        private void put(int parameterIndex, byte kind, Object value) {
+            this.kinds[parameterIndex - 1] = kind;
+            this.values[parameterIndex - 1] = value;
+        }
+
+        void setString(int parameterIndex, String value) {
+            put(parameterIndex, STRING, value);
+        }
+
+        void setInt(int parameterIndex, int value) {
+            put(parameterIndex, INT, value);
+        }
+
+        void setLong(int parameterIndex, long value) {
+            put(parameterIndex, LONG, value);
+        }
+
+        void setBoolean(int parameterIndex, boolean value) {
+            put(parameterIndex, BOOLEAN, value);
+        }
+
+        void setObject(int parameterIndex, Object value) {
+            put(parameterIndex, OBJECT, value);
+        }
+
+        void setObject(int parameterIndex, Object value, int sqlType) {
+            put(parameterIndex, OBJECT_TYPED, value);
+            this.sqlTypes[parameterIndex - 1] = sqlType;
+        }
+
+        /**
+         * Bind all parameters to the statement.
+         */
+        void bindTo(PreparedStatement pstmt) throws SQLException {
+            for (int i = 0; i < SQL_IDX_JSON; i++) {
+                Object value = this.values[i];
+                switch (this.kinds[i]) {
+                    case STRING -> pstmt.setString(i + 1, (String) value);
+                    case INT -> pstmt.setInt(i + 1, (Integer) value);
+                    case LONG -> pstmt.setLong(i + 1, (Long) value);
+                    case BOOLEAN -> pstmt.setBoolean(i + 1, (Boolean) value);
+                    case OBJECT -> pstmt.setObject(i + 1, value);
+                    case OBJECT_TYPED -> pstmt.setObject(i + 1, value, this.sqlTypes[i]);
+                    default -> throw new IllegalStateException("Unknown parameter kind: " + this.kinds[i]);
+                }
+            }
+        }
     }
 }
